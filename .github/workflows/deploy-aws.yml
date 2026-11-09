@@ -132,9 +132,9 @@ jobs:
           sudo install -m 600 "/tmp/iot-ai-runtime-${SHA}.env" /opt/iot-ai/.env
           rm -f "/tmp/iot-ai-runtime-${SHA}.env"
           cd /opt/iot-ai
-          sudo docker compose --env-file .env -f docker-compose.yml -f docker-compose.aws.yml up -d --build --remove-orphans
+          sudo docker-compose --env-file .env -f docker-compose.yml -f docker-compose.aws.yml up -d --build --remove-orphans
           sudo docker image prune -f
-          curl --fail --silent --show-error http://127.0.0.1:8000/api/status >/dev/null
+          curl --fail --silent --show-error http://127.0.0.1/api/status >/dev/null
           REMOTE
 
       - name: Publish deployment summary
