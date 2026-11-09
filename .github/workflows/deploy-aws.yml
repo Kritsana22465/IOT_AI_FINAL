@@ -75,8 +75,7 @@ jobs:
             --exclude=datasetsIOT \
             --exclude=__pycache__ \
             --exclude=.venv \
-            --exclude=deploy.tar.gz \
-            -czf deploy.tar.gz .
+            -czf "$RUNNER_TEMP/deploy.tar.gz" .
 
       - name: Configure SSH
         if: steps.preflight.outputs.ready == 'true'
@@ -98,7 +97,7 @@ jobs:
         env:
           AWS_HOST: ${{ secrets.AWS_HOST }}
           AWS_USER: ${{ secrets.AWS_USER || 'ec2-user' }}
-        run: scp deploy.tar.gz "${AWS_USER}@${AWS_HOST}:/tmp/iot-ai-deploy-${GITHUB_SHA}.tar.gz"
+        run: scp "$RUNNER_TEMP/deploy.tar.gz" "${AWS_USER}@${AWS_HOST}:/tmp/iot-ai-deploy-${GITHUB_SHA}.tar.gz"
 
       - name: Upload runtime secrets
         if: steps.preflight.outputs.ready == 'true'
