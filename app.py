@@ -32,6 +32,7 @@ SNAPSHOT_ROOT = Path(
     os.getenv("SNAPSHOT_DIR", str(ROOT / "data" / "snapshots"))
 ).resolve()
 SNAPSHOT_BUCKET = os.getenv("SNAPSHOT_BUCKET", "").strip()
+IMAGE_STORAGE = os.getenv("IMAGE_STORAGE", "filesystem").strip().lower()
 AWS_REGION = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 if not DATABASE_URL:
@@ -77,6 +78,7 @@ class EventStore:
         self.database_url = database_url
         self.snapshot_root = snapshot_root
         self.snapshot_bucket = snapshot_bucket
+        self.database_images = IMAGE_STORAGE == "database"
         self._s3 = (
             boto3.client("s3", region_name=aws_region) if snapshot_bucket else None
         )
@@ -97,8 +99,15 @@ class EventStore:
                     labels JSONB NOT NULL DEFAULT '{}'::jsonb,
                     total INTEGER NOT NULL DEFAULT 0,
                     image_path TEXT NOT NULL,
+                    image_data BYTEA,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
+                """
+            )
+            connection.execute(
+                """
+                ALTER TABLE device_events
+                ADD COLUMN IF NOT EXISTS image_data BYTEA
                 """
             )
             connection.execute(
@@ -163,28 +172,38 @@ class EventStore:
     ) -> dict[str, Any]:
         event_key = uuid.uuid4().hex
         relative_path = f"{event_key}.jpg"
-        self._store_image(relative_path, image)
+        if not self.database_images:
+            self._store_image(relative_path, image)
         detected_at = datetime.now(timezone.utc)
         try:
             with self.connection() as connection:
                 row = connection.execute(
                     """
                     INSERT INTO device_events
-                        (detected_at, labels, total, image_path)
-                    VALUES (%s, %s, %s, %s)
+                        (detected_at, labels, total, image_path, image_data)
+                    VALUES (%s, %s, %s, %s, %s)
                     RETURNING id, detected_at, labels, total, image_path
                     """,
-                    (detected_at, Json(labels), total, relative_path),
+                    (
+                        detected_at,
+                        Json(labels),
+                        total,
+                        relative_path,
+                        image if self.database_images else None,
+                    ),
                 ).fetchone()
                 connection.commit()
         except Exception:
-            self._delete_image(relative_path)
+            if not self.database_images:
+                self._delete_image(relative_path)
             raise
         if row is None:
             raise RuntimeError("บันทึกเหตุการณ์ไม่สำเร็จ")
         return self._payload(row)
 
     def _store_image(self, relative_path: str, image: bytes) -> None:
+        if self.database_images:
+            return
         if self._s3 is not None:
             self._s3.put_object(
                 Bucket=self.snapshot_bucket,
@@ -197,6 +216,8 @@ class EventStore:
         (self.snapshot_root / relative_path).write_bytes(image)
 
     def _delete_image(self, relative_path: str) -> None:
+        if self.database_images:
+            return
         if self._s3 is not None:
             self._s3.delete_object(
                 Bucket=self.snapshot_bucket,
@@ -233,11 +254,13 @@ class EventStore:
     def image_bytes(self, event_id: int) -> bytes | None:
         with self.connection() as connection:
             row = connection.execute(
-                "SELECT image_path FROM device_events WHERE id = %s",
+                "SELECT image_path, image_data FROM device_events WHERE id = %s",
                 (event_id,),
             ).fetchone()
         if row is None:
             return None
+        if row["image_data"] is not None:
+            return bytes(row["image_data"])
         relative_path = row["image_path"]
         if self._s3 is not None:
             result = self._s3.get_object(

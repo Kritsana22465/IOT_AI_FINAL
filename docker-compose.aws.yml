@@ -3,21 +3,18 @@ services:
     restart: unless-stopped
 
   dashboard:
-    image: ${DASHBOARD_IMAGE:?DASHBOARD_IMAGE is required}
-    build: !reset null
     restart: unless-stopped
     ports: !reset []
-    expose:
-      - "8000"
     environment:
-      ARDUINO_API_KEY: ${ARDUINO_API_KEY:?ARDUINO_API_KEY is required}
+      IMAGE_STORAGE: filesystem
 
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
-      dashboard:
-        condition: service_started
+      - dashboard
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN is required}
     ports:
       - "80:80"
       - "443:443"

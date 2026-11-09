@@ -13,18 +13,17 @@
 
 สถานะกันการบันทึกซ้ำถูกเก็บใน PostgreSQL จึงไม่เริ่มรอบใหม่เพียงเพราะ container restart
 
-## โครงสร้าง cloud แบบไม่เสียค่าใช้จ่าย
+## โครงสร้าง AWS
 
-ใช้ Oracle Cloud Always Free VM แบบ ARM ใน region `ap-singapore-1`:
+ใช้ AWS Project ชื่อ `Future Startup` ใน region `ap-southeast-2` โดยรัน Docker บน EC2 และใช้ PostgreSQL ใน Docker volume เดียวกับเครื่อง:
 
-- VM.Standard.A1.Flex: 2 OCPU, RAM 12 GB (Always Free target)
-- หาก A1 ไม่มี capacity ใช้ VM.Standard.E2.1.Micro (Always Free) แล้วให้ GitHub Actions build image แทนบน VM
+- EC2 Linux ขนาดที่อยู่ใน Free Tier/เครดิตของบัญชี เช่น `t3.small` เพื่อให้ YOLO มีหน่วยความจำพอ
 - Docker Compose: Dashboard, PostgreSQL และ Caddy HTTPS
-- PostgreSQL และรูปภาพเก็บบน disk ของ VM
-- Caddy ขอใบรับรอง HTTPS ให้อัตโนมัติ
-- GitHub Actions deploy ทุกครั้งที่ push เข้า `main`
+- PostgreSQL และรูปภาพเก็บบน EBS volume ของ EC2
+- ใช้ hostname แบบ `nip.io` จาก Elastic IP ได้ จึงไม่ต้องซื้อโดเมนเพิ่ม
+- GitHub Actions ตรวจสอบโค้ดและ deploy ทุกครั้งที่ push เข้า `main`
 
-วิธีนี้ไม่ใช้ AWS, S3 หรือบริการเสียเงินเพิ่มเติม แต่ Always Free ยังขึ้นกับ quota และ capacity ของ Oracle Cloud
+AWS แสดงเครดิตคงเหลือและวันหมดอายุในหน้า Console Home ของบัญชีนี้แล้ว ควรตรวจสอบ Billing เป็นระยะ เพราะการใช้ฟรีขึ้นกับ Free Tier/เครดิตและชนิด instance ที่เลือก
 
 ## รันในเครื่องด้วย Docker
 
@@ -49,35 +48,26 @@ const char API_KEY[] = "ค่าเดียวกับ ARDUINO_API_KEY";
 
 อย่า commit ค่า Wi-Fi หรือ API key จริงลง GitHub
 
-## Deploy Oracle Cloud ครั้งแรก
+## Deploy AWS ครั้งแรก
 
-สร้าง VM ด้วย Ubuntu ARM และติดตั้ง Docker Compose จากนั้นเตรียมโฟลเดอร์ `/opt/iot-ai` บน VM โดยให้ user `ubuntu` ใช้ SSH ได้
-
-สร้างไฟล์ SSH สำหรับ GitHub Actions บนเครื่องของคุณ แล้วเพิ่ม public key เข้า VM:
-
-```powershell
-ssh-keygen -t ed25519 -f $env:USERPROFILE\.ssh\iot-oci -C iot-ai-oci
-Get-Content $env:USERPROFILE\.ssh\iot-oci.pub
-```
+สร้าง EC2 ด้วย Ubuntu 24.04 x86 และเลือก user data จากไฟล์ `infra/cloud-init-aws.yaml` เพื่อให้ติดตั้ง Docker อัตโนมัติ จากนั้นเปิด Security Group เฉพาะพอร์ต `22`, `80`, `443` และผูก Elastic IP เข้ากับ instance
 
 ตั้งค่า GitHub repository secrets:
 
-- `OCI_HOST`: public IP ของ VM
-- `OCI_USER`: `ubuntu`
-- `OCI_SSH_PRIVATE_KEY`: เนื้อหาไฟล์ `iot-oci` (private key)
-- `DOMAIN`: hostname ที่ชี้มาที่ public IP ของ VM เช่น `123.123.123.123.nip.io` หรือโดเมนของคุณ
+- `AWS_HOST`: Elastic IP ของ EC2
+- `AWS_USER`: `ubuntu`
+- `AWS_SSH_PRIVATE_KEY`: private key ของ EC2 key pair
+- `DOMAIN`: เช่น `12.34.56.78.nip.io` โดยแทนด้วย Elastic IP จริง หรือใช้โดเมนของคุณ
 - `POSTGRES_PASSWORD`: รหัส PostgreSQL ที่ยาวและสุ่ม
 - `ARDUINO_API_KEY`: API key ที่จะใส่ใน Arduino
 
-จากนั้น push branch `main` ไฟล์ `.github/workflows/deploy-oci.yml` จะทำงานโดยอัตโนมัติ:
+จากนั้น workflow `.github/workflows/deploy-aws.yml` จะทำงานอัตโนมัติ:
 
-- ส่ง source code ไปยัง VM
-- สร้างและ publish Docker image ไป GHCR ด้วย GitHub Actions
-- อัปเดต Dashboard และ PostgreSQL โดยคงข้อมูลเดิมไว้
+- ตรวจสอบ Python และ Docker Compose
+- ส่ง source code ไปยัง EC2
+- build และ restart Dashboard, PostgreSQL และ Caddy
 - เปิด HTTPS ผ่าน Caddy
 - ตรวจสอบ `/api/status` หลัง deploy
-
-บน VM ให้สร้างไฟล์ `Caddyfile` จากไฟล์ใน repository และเปิด security list/security group เฉพาะพอร์ต `22`, `80`, `443` เท่านั้น
 
 หน้าเว็บ cloud ต้องเปิดผ่าน HTTPS เพื่อให้เบราว์เซอร์อนุญาตกล้อง
 

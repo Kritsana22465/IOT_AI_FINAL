@@ -1,4 +1,4 @@
-name: Deploy IoT dashboard to Oracle Cloud
+name: Validate and deploy IoT dashboard to AWS
 
 on:
   push:
@@ -8,56 +8,57 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
-  group: iot-ai-production
+  group: iot-ai-aws-production
   cancel-in-progress: false
 
 jobs:
-  build:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate Python syntax
+        run: python -m py_compile app.py
 
-      - name: Build and publish dashboard image
+      - name: Validate Compose files
+        shell: bash
+        env:
+          DOMAIN: example.com
+        run: docker compose -f docker-compose.yml -f docker-compose.aws.yml config >/dev/null
+
+      - name: Build dashboard image
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
-          tags: ghcr.io/kritsana22465/iot_ai_final-dashboard:latest
+          push: false
+          tags: iot-ai-dashboard:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   deploy:
-    needs: build
+    needs: validate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Check deploy configuration
+      - name: Check deployment secrets
         id: preflight
         shell: bash
         env:
-          OCI_HOST: ${{ secrets.OCI_HOST }}
-          OCI_SSH_PRIVATE_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+          AWS_HOST: ${{ secrets.AWS_HOST }}
+          AWS_SSH_PRIVATE_KEY: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
           DOMAIN: ${{ secrets.DOMAIN }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           ARDUINO_API_KEY: ${{ secrets.ARDUINO_API_KEY }}
         run: |
           set -euo pipefail
-          if [[ -z "$OCI_HOST" || -z "$OCI_SSH_PRIVATE_KEY" || -z "$DOMAIN" || -z "$POSTGRES_PASSWORD" || -z "$ARDUINO_API_KEY" ]]; then
+          if [[ -z "$AWS_HOST" || -z "$AWS_SSH_PRIVATE_KEY" || -z "$DOMAIN" || -z "$POSTGRES_PASSWORD" || -z "$ARDUINO_API_KEY" ]]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "OCI deploy secrets are not configured yet; skipping deployment."
+            echo "AWS deploy secrets are not configured yet; skipping remote deployment."
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
@@ -80,50 +81,50 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         shell: bash
         env:
-          OCI_HOST: ${{ secrets.OCI_HOST }}
-          OCI_SSH_PRIVATE_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+          AWS_HOST: ${{ secrets.AWS_HOST }}
+          AWS_SSH_PRIVATE_KEY: ${{ secrets.AWS_SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          printf '%s\n' "$OCI_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$AWS_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "$OCI_HOST" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "$AWS_HOST" >> ~/.ssh/known_hosts
 
       - name: Upload application bundle
         if: steps.preflight.outputs.ready == 'true'
         shell: bash
         env:
-          OCI_HOST: ${{ secrets.OCI_HOST }}
-          OCI_USER: ${{ secrets.OCI_USER || 'ubuntu' }}
-        run: scp deploy.tar.gz "${OCI_USER}@${OCI_HOST}:/tmp/iot-ai-deploy-${GITHUB_SHA}.tar.gz"
+          AWS_HOST: ${{ secrets.AWS_HOST }}
+          AWS_USER: ${{ secrets.AWS_USER || 'ubuntu' }}
+        run: scp deploy.tar.gz "${AWS_USER}@${AWS_HOST}:/tmp/iot-ai-deploy-${GITHUB_SHA}.tar.gz"
 
       - name: Upload runtime secrets
         if: steps.preflight.outputs.ready == 'true'
         shell: bash
         env:
-          OCI_HOST: ${{ secrets.OCI_HOST }}
-          OCI_USER: ${{ secrets.OCI_USER || 'ubuntu' }}
+          AWS_HOST: ${{ secrets.AWS_HOST }}
+          AWS_USER: ${{ secrets.AWS_USER || 'ubuntu' }}
           DOMAIN: ${{ secrets.DOMAIN }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           ARDUINO_API_KEY: ${{ secrets.ARDUINO_API_KEY }}
         run: |
           set -euo pipefail
           umask 077
-          printf 'POSTGRES_DB=iot_dashboard\nPOSTGRES_USER=iot_user\nPOSTGRES_PASSWORD=%s\nARDUINO_API_KEY=%s\nDOMAIN=%s\nDASHBOARD_IMAGE=ghcr.io/kritsana22465/iot_ai_final-dashboard:latest\n' \
+          printf 'POSTGRES_DB=iot_dashboard\nPOSTGRES_USER=iot_user\nPOSTGRES_PASSWORD=%s\nARDUINO_API_KEY=%s\nDOMAIN=%s\n' \
             "$POSTGRES_PASSWORD" "$ARDUINO_API_KEY" "$DOMAIN" > runtime.env
-          scp runtime.env "${OCI_USER}@${OCI_HOST}:/tmp/iot-ai-runtime-${GITHUB_SHA}.env"
+          scp runtime.env "${AWS_USER}@${AWS_HOST}:/tmp/iot-ai-runtime-${GITHUB_SHA}.env"
           rm -f runtime.env
 
-      - name: Deploy on Oracle VM
+      - name: Deploy on EC2
         if: steps.preflight.outputs.ready == 'true'
         shell: bash
         env:
-          OCI_HOST: ${{ secrets.OCI_HOST }}
-          OCI_USER: ${{ secrets.OCI_USER || 'ubuntu' }}
+          AWS_HOST: ${{ secrets.AWS_HOST }}
+          AWS_USER: ${{ secrets.AWS_USER || 'ubuntu' }}
         run: |
           set -euo pipefail
-          ssh "${OCI_USER}@${OCI_HOST}" "SHA=${GITHUB_SHA} bash -s" <<'REMOTE'
+          ssh "${AWS_USER}@${AWS_HOST}" "SHA=${GITHUB_SHA} bash -s" <<'REMOTE'
           set -euo pipefail
           sudo mkdir -p /opt/iot-ai
           sudo tar -xzf "/tmp/iot-ai-deploy-${SHA}.tar.gz" -C /opt/iot-ai
@@ -131,8 +132,7 @@ jobs:
           sudo install -m 600 "/tmp/iot-ai-runtime-${SHA}.env" /opt/iot-ai/.env
           rm -f "/tmp/iot-ai-runtime-${SHA}.env"
           cd /opt/iot-ai
-          sudo docker compose -f docker-compose.yml -f docker-compose.oci.yml pull dashboard
-          sudo docker compose -f docker-compose.yml -f docker-compose.oci.yml up -d --remove-orphans
+          sudo docker compose --env-file .env -f docker-compose.yml -f docker-compose.aws.yml up -d --build --remove-orphans
           sudo docker image prune -f
           curl --fail --silent --show-error http://127.0.0.1:8000/api/status >/dev/null
           REMOTE
@@ -141,5 +141,8 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         env:
           DOMAIN: ${{ secrets.DOMAIN }}
-        run: |
-          echo "Dashboard URL: https://${DOMAIN}" >> "$GITHUB_STEP_SUMMARY"
+        run: echo "Dashboard URL: https://${DOMAIN}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Explain skipped deployment
+        if: steps.preflight.outputs.ready != 'true'
+        run: echo "Validation passed. Add AWS_HOST, AWS_SSH_PRIVATE_KEY, DOMAIN, POSTGRES_PASSWORD, and ARDUINO_API_KEY to enable EC2 deployment."
