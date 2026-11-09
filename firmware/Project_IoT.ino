@@ -8,7 +8,7 @@ const bool IR_ACTIVE_HIGH = true;
 // กรอกค่าเฉพาะเครื่องก่อน Upload และอย่า commit ค่าจริงลง GitHub
 const char WIFI_SSID[] = "YOUR_WIFI_NAME";
 const char WIFI_PASSWORD[] = "YOUR_WIFI_PASSWORD";
-const char API_HOST[] = "iot.example.com";
+const char API_HOST[] = "d1klutfjlhnmro.cloudfront.net";
 const int API_PORT = 443;
 const char API_PATH[] = "/api/arduino/ir";
 const char API_KEY[] = "YOUR_ARDUINO_API_KEY";
