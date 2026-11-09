@@ -141,7 +141,7 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         env:
           DOMAIN: ${{ secrets.DOMAIN }}
-        run: echo "Dashboard URL: https://${DOMAIN}" >> "$GITHUB_STEP_SUMMARY"
+        run: 'echo "Dashboard URL: https://${DOMAIN}" >> "$GITHUB_STEP_SUMMARY"'
 
       - name: Explain skipped deployment
         if: steps.preflight.outputs.ready != 'true'
