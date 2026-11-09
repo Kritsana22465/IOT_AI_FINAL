@@ -134,6 +134,12 @@ jobs:
           cd /opt/iot-ai
           sudo docker-compose --env-file .env -f docker-compose.yml -f docker-compose.aws.yml up -d --build --remove-orphans
           sudo docker image prune -f
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1/api/status >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
           curl --fail --silent --show-error http://127.0.0.1/api/status >/dev/null
           REMOTE
 
