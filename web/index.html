@@ -43,11 +43,14 @@
     h2 { font-size: 16px; }
     .tiny { color: var(--muted); font-size: 12px; }
     .video-frame { position: relative; min-height: 310px; aspect-ratio: 16/9; background: #070a10; display: grid; place-items: center; overflow: hidden; }
-    .video-frame img { width: 100%; height: 100%; position: absolute; inset: 0; object-fit: contain; }
+    .video-frame video, .video-frame img { width: 100%; height: 100%; position: absolute; inset: 0; object-fit: contain; }
+    .video-frame img { display: none; }
+    .video-frame.has-result img { display: block; }
+    .video-frame.has-result video { opacity: 0; }
     .video-empty { position: relative; z-index: 1; padding: 24px; text-align: center; color: var(--muted); pointer-events: none; }
     .video-empty .camera-icon { font-size: 34px; margin-bottom: 8px; }
     .video-frame.active .video-empty { display: none; }
-    .camera-controls { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; align-items: end; padding: 16px 20px 19px; }
+    .camera-controls { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; padding: 16px 20px 19px; }
     label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
     input, select, button { font: inherit; }
     input, select { width: 100%; color: var(--text); background: #0d1421; border: 1px solid var(--line); border-radius: 9px; padding: 10px 11px; outline: none; }
@@ -58,29 +61,46 @@
     button.secondary { background: #29374b; color: var(--text); }
     button.danger { background: #472833; color: #ffd9dc; }
     button:disabled { opacity: .55; cursor: not-allowed; }
-    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 18px; }
+    .cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 18px; }
     .metric { padding: 17px; border: 1px solid var(--line); border-radius: 15px; background: #101827; }
     .metric-name { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 13px; }
     .metric-value { font-size: 34px; line-height: 1.2; font-weight: 700; margin-top: 12px; }
     .metric-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: var(--cyan); }
     .side { display: grid; gap: 18px; }
-    .sensor-body, .serial-body { padding: 18px 20px 20px; }
-    .sensor-reading { display: flex; align-items: baseline; gap: 8px; margin: 4px 0 14px; }
-    .sensor-reading strong { font-size: 42px; line-height: 1.1; }
-    .sensor-reading span { color: var(--muted); }
+    .sensor-body, .system-body { padding: 18px 20px 20px; }
+    .sensor-group { padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: #0f1726; }
+    .sensor-group + .sensor-group { margin-top: 12px; }
+    .sensor-group-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .sensor-group-title { font-size: 14px; font-weight: 700; }
+    .sensor-group-description { margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .sensor-group .relay-row { margin-top: 11px; padding-top: 11px; }
     .relay-row { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--line); padding-top: 14px; }
-    .relay-state { color: var(--muted); }
-    .relay-state.on { color: var(--green); }
-    .relay-state.off { color: var(--amber); }
-    .relay-state.stale { color: var(--amber); }
+    .presence-state { color: var(--muted); }
+    .presence-state.on { color: var(--green); }
+    .presence-state.off { color: var(--amber); }
+    .presence-state.stale { color: var(--amber); }
     .sensor-health.ready { color: var(--green); }
     .sensor-health.unavailable { color: var(--amber); }
-    .serial-form { display: grid; grid-template-columns: 1fr auto; gap: 9px; align-items: end; margin-top: 14px; }
-    .serial-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 15px; }
+    .connection-info { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 12px; }
+    .connection-info strong { color: var(--cyan); }
     .error { display: none; padding: 11px 13px; color: #ffd5da; background: #482531; border: 1px solid #713744; border-radius: 10px; font-size: 13px; }
     .error.visible { display: block; }
     .notice { margin-top: 16px; padding: 12px 14px; color: var(--muted); font-size: 12px; border: 1px solid var(--line); border-radius: 11px; }
     .notice strong { color: var(--amber); }
+    .event-list { display: grid; gap: 10px; padding: 16px 20px 20px; max-height: 350px; overflow-y: auto; }
+    .event-item { display: grid; grid-template-columns: 76px 1fr; gap: 11px; width: 100%; padding: 9px; color: var(--text); text-align: left; background: #0f1726; border: 1px solid var(--line); border-radius: 11px; }
+    .event-item:hover { border-color: var(--cyan); }
+    .event-thumb { width: 76px; height: 58px; object-fit: cover; border-radius: 7px; background: #070a10; }
+    .event-time { font-size: 13px; font-weight: 700; }
+    .event-labels { margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .event-empty { color: var(--muted); font-size: 12px; text-align: center; padding: 12px 0; }
+    .modal { display: none; position: fixed; inset: 0; z-index: 10; place-items: center; padding: 22px; background: #0009; }
+    .modal.visible { display: grid; }
+    .modal-card { width: min(760px, 100%); max-height: 90vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 20px 70px #0008; }
+    .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    .modal-close { padding: 6px 10px; background: #29374b; color: var(--text); }
+    .modal-card img { display: block; width: 100%; max-height: 65vh; object-fit: contain; background: #070a10; }
+    .modal-meta { padding: 12px 16px 16px; color: var(--muted); font-size: 13px; }
     .footer { margin-top: 20px; color: #78869c; font-size: 12px; text-align: center; }
     @media (max-width: 850px) {
       .layout { grid-template-columns: 1fr; }
@@ -124,21 +144,14 @@
             <span class="tiny" id="fps">-- FPS</span>
           </div>
           <div class="video-frame" id="video-frame">
+            <video id="camera-preview" autoplay muted playsinline></video>
             <img id="camera-stream" alt="ภาพจากกล้องพร้อมกรอบตรวจจับ">
             <div class="video-empty">
               <div class="camera-icon">▣</div>
-              <div id="video-message">เลือกกล้อง แล้วกด “เริ่มกล้อง”</div>
+              <div id="video-message">เมื่อ IR ตรวจพบอุปกรณ์ ระบบจะเปิดกล้องและบันทึกให้อัตโนมัติ</div>
             </div>
           </div>
           <div class="camera-controls">
-            <div>
-              <label for="camera-index">กล้อง</label>
-              <select id="camera-index">
-                <option value="0">Camera 0</option>
-                <option value="1">Camera 1</option>
-                <option value="2">Camera 2</option>
-              </select>
-            </div>
             <div>
               <label for="confidence">ความมั่นใจขั้นต่ำ</label>
               <input id="confidence" type="number" min="0.1" max="1" step="0.05" value="0.5">
@@ -159,10 +172,6 @@
             <div class="metric-name"><span>Relay module</span><span class="metric-dot" style="background:#ffbd69"></span></div>
             <div class="metric-value" id="count-relay">0</div>
           </article>
-          <article class="metric">
-            <div class="metric-name"><span>Ultrasonic HC-SR04</span><span class="metric-dot" style="background:#a78bfa"></span></div>
-            <div class="metric-value" id="count-ultrasonic">0</div>
-          </article>
         </div>
       </section>
 
@@ -176,35 +185,21 @@
             <span class="tiny" id="arduino-dot">● ออฟไลน์</span>
           </div>
           <div class="sensor-body">
-            <div class="relay-row" style="border:0;padding-top:0">
-              <span>ความพร้อม IR sensor</span>
-              <strong id="ir-ready" class="sensor-health unavailable">ยังไม่เชื่อมต่อ</strong>
-            </div>
-            <div class="relay-row">
-              <span>ของบนแท่น (IR)</span>
-              <strong id="object-presence" class="relay-state">ยังไม่มีข้อมูล</strong>
-            </div>
-            <div class="relay-row">
-              <span>ความพร้อม HC-SR04</span>
-              <strong id="ultrasonic-ready" class="sensor-health unavailable">ยังไม่เชื่อมต่อ</strong>
-            </div>
-            <p class="tiny">ระยะจาก HC-SR04</p>
-            <div class="sensor-reading"><strong id="distance">--</strong><span>cm</span></div>
-            <div class="relay-row">
-              <span>สถานะรีเลย์</span>
-              <strong id="relay-state" class="relay-state">ไม่ทราบ</strong>
-            </div>
-            <div class="serial-form">
-              <div>
-                <label for="serial-port">พอร์ต Serial</label>
-                <select id="serial-port"><option value="">ค้นหาพอร์ต...</option></select>
+            <div class="sensor-group">
+              <div class="sensor-group-head">
+                <div>
+                  <div class="sensor-group-title">IR Sensor</div>
+                  <p class="sensor-group-description">ตรวจจับว่ามีอุปกรณ์วางบนแท่นหรือไม่</p>
+                </div>
+                <strong id="ir-ready" class="sensor-health unavailable">OFF</strong>
               </div>
-              <button class="secondary" onclick="refreshPorts()" aria-label="ค้นหาพอร์ตอีกครั้ง">ค้นหา</button>
+              <div class="relay-row">
+                <span>ผลการตรวจจับ</span>
+                <strong id="object-presence" class="presence-state" aria-live="polite">ยังไม่มีข้อมูล</strong>
+              </div>
             </div>
-            <div class="serial-buttons">
-              <button id="serial-button" onclick="toggleSerial()">เชื่อมต่อ</button>
-              <button id="relay-button" class="secondary" onclick="toggleRelay()" disabled>เปิดรีเลย์</button>
-            </div>
+
+            <div class="connection-info"><span>ช่องทาง Arduino</span><strong>Wi-Fi</strong></div>
           </div>
         </section>
 
@@ -215,34 +210,60 @@
               <p class="tiny">อัปเดตอัตโนมัติ</p>
             </div>
           </div>
-          <div class="serial-body">
+          <div class="system-body">
             <div class="relay-row" style="border:0;padding-top:0"><span>AI Model</span><strong>YOLO11n</strong></div>
             <div class="relay-row"><span>วัตถุในภาพ</span><strong id="total-count">0</strong></div>
             <div class="relay-row"><span>เวลาที่รับข้อมูล Arduino</span><strong class="tiny" id="last-seen">ยังไม่มี</strong></div>
             <div class="notice">
-              <strong>รูปแบบ Serial:</strong> Arduino ส่ง JSON ต่อบรรทัด เช่น
-              <code>{"distance_cm":12.5,"object_present":true,"relay":false}</code>
+              <strong>รูปแบบ Wi-Fi:</strong> Arduino ส่งข้อมูลมายัง Dashboard เช่น
+              <code>{"object_present":true}</code>
               ค่า <code>object_present</code> ต้องเป็น <code>true</code> เมื่อมีของบนแท่น
               และ <code>false</code> เมื่อแท่นว่าง
             </div>
           </div>
         </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>ประวัติการวางอุปกรณ์</h2>
+              <p class="tiny">กดรายการเพื่อดูรูปและเวลาที่ตรวจพบ</p>
+            </div>
+            <span class="tiny" id="event-count">0 รายการ</span>
+          </div>
+          <div id="event-list" class="event-list">
+            <div class="event-empty">ยังไม่มีประวัติการตรวจพบ</div>
+          </div>
+        </section>
       </aside>
     </div>
-    <p class="footer">เว็บนี้รันในเครื่อง · อย่าเปิดพอร์ตออกอินเทอร์เน็ตโดยไม่มีระบบยืนยันตัวตน</p>
   </main>
+  <div id="event-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="event-modal-title">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2 id="event-modal-title">รายละเอียดการตรวจพบ</h2>
+        <button class="modal-close" onclick="closeEvent()">ปิด</button>
+      </div>
+      <img id="event-image" alt="รูปอุปกรณ์ที่ตรวจพบ">
+      <div id="event-meta" class="modal-meta"></div>
+    </div>
+  </div>
   <script>
     const byId = (id) => document.getElementById(id);
     let cameraRunning = false;
-    let serialConnected = false;
-    let relayEnabled = null;
+    let browserStream = null;
+    let frameTimer = null;
+    let frameInFlight = false;
+    let captureRequestInFlight = false;
+    let lastCaptureRequestId = null;
+    let captureRetryAt = 0;
+    let captureClosing = false;
     let errorTimer;
 
     async function request(path, options = {}) {
-      const response = await fetch(path, {
-        ...options,
-        headers: { "Content-Type": "application/json", ...(options.headers || {}) }
-      });
+      const headers = { ...(options.headers || {}) };
+      if (!(options.body instanceof FormData)) headers["Content-Type"] = "application/json";
+      const response = await fetch(path, { ...options, headers });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || "เกิดข้อผิดพลาดในการเชื่อมต่อ");
       return payload;
@@ -256,76 +277,79 @@
       errorTimer = setTimeout(() => box.classList.remove("visible"), 8000);
     }
 
-    function renderStatus(data) {
-      const camera = data.camera;
-      const arduino = data.arduino;
-      cameraRunning = camera.running;
-      serialConnected = arduino.connected;
-      relayEnabled = arduino.relay;
+    function formatEventTime(value) {
+      return new Date(value).toLocaleString("th-TH", {
+        dateStyle: "medium",
+        timeStyle: "medium"
+      });
+    }
 
+    function labelsText(labels) {
+      const entries = Object.entries(labels || {});
+      return entries.length ? entries.map(([name, count]) => `${name} × ${count}`).join(" · ") : "ตรวจพบอุปกรณ์";
+    }
+
+    function renderCamera(camera) {
+      cameraRunning = camera.running;
       byId("camera-button").textContent = cameraRunning ? "หยุดกล้อง" : "เริ่มกล้อง";
       byId("camera-button").className = cameraRunning ? "danger" : "";
       byId("camera-button").disabled = false;
       byId("video-frame").classList.toggle("active", cameraRunning);
-      if (!cameraRunning) byId("camera-stream").removeAttribute("src");
+      if (!cameraRunning) {
+        byId("camera-stream").removeAttribute("src");
+        byId("video-frame").classList.remove("has-result");
+      }
       byId("camera-caption").textContent = cameraRunning
-        ? `Camera ${camera.camera_index} · ตรวจจับ ${camera.total} วัตถุ`
+        ? `กล้องเบราว์เซอร์ · ตรวจจับ ${camera.total} วัตถุ`
         : "YOLO11n · รอเปิดกล้อง";
-      byId("video-message").textContent = camera.error || "เลือกกล้อง แล้วกด “เริ่มกล้อง”";
+      byId("video-message").textContent = camera.error
+        || (camera.capture_completed
+          ? "บันทึกประวัติแล้ว กำลังปิดกล้อง"
+          : "เมื่อ IR ตรวจพบอุปกรณ์ ระบบจะเปิดกล้องและบันทึกให้อัตโนมัติ");
       byId("fps").textContent = cameraRunning ? `${camera.fps} FPS` : "-- FPS";
       const counts = camera.counts || {};
       byId("count-banana").textContent = counts["Banana Pi"] || 0;
       byId("count-relay").textContent = counts["Relay module"] || 0;
-      byId("count-ultrasonic").textContent = counts["Ultrasonic HC-SR04"] || 0;
       byId("total-count").textContent = camera.total || 0;
+      if (camera.error) showError(camera.error);
+    }
 
+    function renderArduino(arduino) {
       byId("arduino-caption").textContent = arduino.connected
-        ? `เชื่อมต่อที่ ${arduino.port}`
-        : "ยังไม่ได้เชื่อมต่อ";
+        ? "เชื่อมต่อผ่าน Wi-Fi"
+        : "รอ Arduino ส่งข้อมูลผ่าน Wi-Fi";
       byId("arduino-dot").textContent = arduino.connected ? "● ออนไลน์" : "● ออฟไลน์";
       byId("arduino-dot").style.color = arduino.connected ? "var(--green)" : "var(--muted)";
-      byId("distance").textContent = arduino.distance_cm ?? "--";
-      const sensorStatus = (ready) => {
-        if (ready) return "พร้อมใช้งาน";
-        if (!arduino.connected) return "ยังไม่เชื่อมต่อ";
-        return arduino.last_seen ? "ไม่พร้อมใช้งาน" : "รอข้อมูล";
-      };
-      for (const [id, ready] of [
-        ["ir-ready", arduino.ir_ready],
-        ["ultrasonic-ready", arduino.ultrasonic_ready]
-      ]) {
-        const element = byId(id);
-        element.textContent = sensorStatus(ready);
-        element.className = `sensor-health ${ready ? "ready" : "unavailable"}`;
-      }
+      const irReady = byId("ir-ready");
+      irReady.textContent = arduino.ir_ready ? "ON" : "OFF";
+      irReady.className = `sensor-health ${arduino.ir_ready ? "ready" : "unavailable"}`;
       const presence = byId("object-presence");
       if (arduino.object_present === null) {
         presence.textContent = "ยังไม่มีข้อมูล";
-        presence.className = "relay-state";
+        presence.className = "presence-state";
       } else if (!arduino.ir_ready) {
-        presence.textContent = `${arduino.object_present ? "มีของบนแท่น" : "แท่นว่าง"} (ข้อมูลเก่า)`;
-        presence.className = "relay-state stale";
+        presence.textContent = `${arduino.object_present ? "มีอุปกรณ์มาวางแล้ว" : "ยังไม่มีอุปกรณ์"} (ข้อมูลเก่า)`;
+        presence.className = "presence-state stale";
       } else {
-        presence.textContent = arduino.object_present ? "มีของบนแท่น" : "แท่นว่าง";
-        presence.className = `relay-state ${arduino.object_present ? "on" : "off"}`;
+        presence.textContent = arduino.object_present ? "มีอุปกรณ์มาวางแล้ว" : "ยังไม่มีอุปกรณ์";
+        presence.className = `presence-state ${arduino.object_present ? "on" : "off"}`;
       }
-      const relayState = byId("relay-state");
-      relayState.textContent = arduino.relay === null ? "ไม่ทราบ" : arduino.relay ? "เปิด" : "ปิด";
-      relayState.className = `relay-state ${arduino.relay === null ? "" : arduino.relay ? "on" : "off"}`;
-      byId("relay-button").textContent = arduino.relay ? "ปิดรีเลย์" : "เปิดรีเลย์";
-      byId("relay-button").disabled = !arduino.connected;
-      byId("serial-button").textContent = arduino.connected ? "ตัดการเชื่อมต่อ" : "เชื่อมต่อ";
-      byId("serial-button").className = arduino.connected ? "danger" : "";
-      byId("system-status").textContent = cameraRunning || arduino.connected ? "ระบบออนไลน์" : "ระบบพร้อมใช้งาน";
-      byId("system-status").classList.toggle("online", cameraRunning || arduino.connected);
-
-      if (arduino.last_seen) {
-        byId("last-seen").textContent = new Date(arduino.last_seen * 1000).toLocaleTimeString("th-TH");
-      } else {
-        byId("last-seen").textContent = "ยังไม่มี";
+      byId("last-seen").textContent = arduino.last_seen
+        ? new Date(arduino.last_seen * 1000).toLocaleTimeString("th-TH")
+        : "ยังไม่มี";
+      if (arduino.capture_pending) {
+        byId("camera-caption").textContent = "IR ตรวจพบอุปกรณ์ · กำลังเตรียมกล้อง";
       }
-      if (camera.error) showError(camera.error);
       if (arduino.error) showError(arduino.error);
+    }
+
+    function renderStatus(data) {
+      renderCamera(data.camera);
+      renderArduino(data.arduino);
+      maybeStartTriggeredCapture(data.arduino);
+      const online = data.camera.running || data.arduino.connected;
+      byId("system-status").textContent = online ? "ระบบออนไลน์" : "ระบบพร้อมใช้งาน";
+      byId("system-status").classList.toggle("online", online);
     }
 
     async function refreshStatus() {
@@ -337,25 +361,85 @@
       }
     }
 
+    async function sendCameraFrame() {
+      if (!cameraRunning || frameInFlight) return;
+      const video = byId("camera-preview");
+      if (video.readyState < 2 || !video.videoWidth) return;
+      frameInFlight = true;
+      try {
+        const canvas = document.createElement("canvas");
+        const scale = Math.min(1, 960 / video.videoWidth);
+        canvas.width = Math.round(video.videoWidth * scale);
+        canvas.height = Math.round(video.videoHeight * scale);
+        canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.78));
+        if (!blob) throw new Error("สร้างภาพจากกล้องไม่ได้");
+        const form = new FormData();
+        form.append("file", blob, "camera.jpg");
+        const response = await fetch("/api/camera/frame", { method: "POST", body: form });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "ส่งภาพไปประมวลผลไม่ได้");
+        byId("camera-stream").src = payload.image;
+        byId("video-frame").classList.add("has-result");
+        renderCamera(payload.camera);
+        if (payload.camera.capture_completed && !captureClosing) {
+          captureClosing = true;
+          await stopBrowserCamera();
+          captureClosing = false;
+          await refreshStatus();
+          await refreshEvents();
+        }
+      } catch (error) {
+        showError(error.message);
+      } finally {
+        frameInFlight = false;
+      }
+    }
+
+    async function startBrowserCamera(triggerId = null) {
+      const cameraState = await request("/api/camera/start", {
+        method: "POST",
+        body: JSON.stringify({
+          confidence: Number(byId("confidence").value),
+          iou: Number(byId("iou").value),
+          mode: "browser",
+          trigger_id: triggerId
+        })
+      });
+      renderCamera(cameraState);
+      try {
+        browserStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
+        });
+        const video = byId("camera-preview");
+        video.srcObject = browserStream;
+        await video.play();
+        cameraRunning = true;
+        frameTimer = setInterval(sendCameraFrame, 700);
+        await sendCameraFrame();
+      } catch (error) {
+        await request("/api/camera/stop", { method: "POST" }).catch(() => {});
+        throw new Error(`เปิดกล้องไม่ได้: ${error.message}`);
+      }
+    }
+
+    async function stopBrowserCamera() {
+      if (frameTimer) clearInterval(frameTimer);
+      frameTimer = null;
+      if (browserStream) browserStream.getTracks().forEach((track) => track.stop());
+      browserStream = null;
+      byId("camera-preview").srcObject = null;
+      cameraRunning = false;
+      await request("/api/camera/stop", { method: "POST" });
+    }
+
     async function toggleCamera() {
       const button = byId("camera-button");
       button.disabled = true;
       try {
-        if (cameraRunning) {
-          await request("/api/camera/stop", { method: "POST" });
-          byId("camera-stream").src = "";
-        } else {
-          const payload = await request("/api/camera/start", {
-            method: "POST",
-            body: JSON.stringify({
-              index: Number(byId("camera-index").value),
-              confidence: Number(byId("confidence").value),
-              iou: Number(byId("iou").value)
-            })
-          });
-          renderStatus({ camera: payload, arduino: (await request("/api/status")).arduino });
-          byId("camera-stream").src = `/api/camera/stream?start=${Date.now()}`;
-        }
+        if (cameraRunning) await stopBrowserCamera();
+        else await startBrowserCamera();
         await refreshStatus();
       } catch (error) {
         showError(error.message);
@@ -364,63 +448,85 @@
       }
     }
 
-    async function refreshPorts() {
+    async function maybeStartTriggeredCapture(arduino) {
+      const requestId = arduino.capture_request_id;
+      if (!arduino.capture_pending || !requestId || requestId === lastCaptureRequestId) return;
+      if (captureRequestInFlight || Date.now() < captureRetryAt) return;
+      if (cameraRunning) return;
+      captureRequestInFlight = true;
       try {
-        const selected = byId("serial-port").value;
-        const result = await request("/api/arduino/ports");
-        const select = byId("serial-port");
-        select.replaceChildren();
-        if (result.ports.length === 0) {
-          select.add(new Option("ไม่พบพอร์ต Serial", ""));
+        await startBrowserCamera(requestId);
+        await request("/api/capture/ack", {
+          method: "POST",
+          body: JSON.stringify({ request_id: requestId })
+        });
+        lastCaptureRequestId = requestId;
+      } catch (error) {
+        captureRetryAt = Date.now() + 5000;
+        showError(`เปิดกล้องอัตโนมัติไม่ได้: ${error.message}`);
+      } finally {
+        captureRequestInFlight = false;
+      }
+    }
+
+    async function refreshEvents() {
+      try {
+        const result = await request("/api/events?limit=50");
+        const events = result.events || [];
+        byId("event-count").textContent = `${events.length} รายการ`;
+        const list = byId("event-list");
+        list.replaceChildren();
+        if (!events.length) {
+          list.innerHTML = '<div class="event-empty">ยังไม่มีประวัติการตรวจพบ</div>';
           return;
         }
-        for (const port of result.ports) {
-          select.add(new Option(`${port.device} — ${port.description}`, port.device));
+        for (const event of events) {
+          const item = document.createElement("button");
+          item.className = "event-item";
+          item.type = "button";
+          item.onclick = () => openEvent(event.id);
+          const image = document.createElement("img");
+          image.className = "event-thumb";
+          image.src = `${event.image_url}?v=${event.id}`;
+          image.alt = "รูปอุปกรณ์ที่ตรวจพบ";
+          const details = document.createElement("div");
+          const time = document.createElement("div");
+          time.className = "event-time";
+          time.textContent = formatEventTime(event.detected_at);
+          const labels = document.createElement("div");
+          labels.className = "event-labels";
+          labels.textContent = labelsText(event.labels);
+          details.append(time, labels);
+          item.append(image, details);
+          list.append(item);
         }
-        if (result.ports.some((port) => port.device === selected)) select.value = selected;
       } catch (error) {
         showError(error.message);
       }
     }
 
-    async function toggleSerial() {
+    async function openEvent(eventId) {
       try {
-        if (serialConnected) {
-          await request("/api/arduino/disconnect", { method: "POST" });
-        } else {
-          const port = byId("serial-port").value;
-          if (!port) throw new Error("เลือกพอร์ต Serial ของ Arduino ก่อน");
-          await request("/api/arduino/connect", {
-            method: "POST",
-            body: JSON.stringify({ port, baudrate: 115200 })
-          });
-        }
-        await refreshStatus();
+        const event = await request(`/api/events/${eventId}`);
+        byId("event-image").src = `${event.image_url}?v=${event.id}`;
+        byId("event-meta").textContent = `${formatEventTime(event.detected_at)} · ${labelsText(event.labels)}`;
+        byId("event-modal").classList.add("visible");
       } catch (error) {
         showError(error.message);
       }
     }
 
-    async function toggleRelay() {
-      try {
-        const enabled = !relayEnabled;
-        await request("/api/arduino/relay", {
-          method: "POST",
-          body: JSON.stringify({ enabled })
-        });
-        showError("ส่งคำสั่งแล้ว รอ Arduino รายงานสถานะรีเลย์กลับมา");
-      } catch (error) {
-        showError(error.message);
-      }
+    function closeEvent() {
+      byId("event-modal").classList.remove("visible");
     }
 
-    byId("camera-stream").addEventListener("error", () => {
-      byId("video-frame").classList.remove("active");
+    byId("event-modal").addEventListener("click", (event) => {
+      if (event.target === byId("event-modal")) closeEvent();
     });
-    refreshPorts();
     refreshStatus();
+    refreshEvents();
     setInterval(refreshStatus, 1000);
-    setInterval(refreshPorts, 5000);
+    setInterval(refreshEvents, 5000);
   </script>
 </body>
 </html>

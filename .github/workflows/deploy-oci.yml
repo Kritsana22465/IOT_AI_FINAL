@@ -1,0 +1,95 @@
+name: Deploy IoT dashboard to Oracle Cloud
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iot-ai-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Package application
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar \
+            --exclude=.git \
+            --exclude=.github \
+            --exclude=data \
+            --exclude=datasetsIOT \
+            --exclude=__pycache__ \
+            --exclude=.venv \
+            -czf deploy.tar.gz .
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          OCI_HOST: ${{ secrets.OCI_HOST }}
+          OCI_SSH_PRIVATE_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$OCI_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$OCI_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload application bundle
+        shell: bash
+        env:
+          OCI_HOST: ${{ secrets.OCI_HOST }}
+          OCI_USER: ${{ secrets.OCI_USER || 'ubuntu' }}
+        run: scp deploy.tar.gz "${OCI_USER}@${OCI_HOST}:/tmp/iot-ai-deploy-${GITHUB_SHA}.tar.gz"
+
+      - name: Upload runtime secrets
+        shell: bash
+        env:
+          OCI_HOST: ${{ secrets.OCI_HOST }}
+          OCI_USER: ${{ secrets.OCI_USER || 'ubuntu' }}
+          DOMAIN: ${{ secrets.DOMAIN }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          ARDUINO_API_KEY: ${{ secrets.ARDUINO_API_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf 'POSTGRES_DB=iot_dashboard\nPOSTGRES_USER=iot_user\nPOSTGRES_PASSWORD=%s\nARDUINO_API_KEY=%s\nDOMAIN=%s\n' \
+            "$POSTGRES_PASSWORD" "$ARDUINO_API_KEY" "$DOMAIN" > runtime.env
+          scp runtime.env "${OCI_USER}@${OCI_HOST}:/tmp/iot-ai-runtime-${GITHUB_SHA}.env"
+          rm -f runtime.env
+
+      - name: Deploy on Oracle VM
+        shell: bash
+        env:
+          OCI_HOST: ${{ secrets.OCI_HOST }}
+          OCI_USER: ${{ secrets.OCI_USER || 'ubuntu' }}
+        run: |
+          set -euo pipefail
+          ssh "${OCI_USER}@${OCI_HOST}" "SHA=${GITHUB_SHA} bash -s" <<'REMOTE'
+          set -euo pipefail
+          sudo mkdir -p /opt/iot-ai
+          sudo tar -xzf "/tmp/iot-ai-deploy-${SHA}.tar.gz" -C /opt/iot-ai
+          rm -f "/tmp/iot-ai-deploy-${SHA}.tar.gz"
+          sudo install -m 600 "/tmp/iot-ai-runtime-${SHA}.env" /opt/iot-ai/.env
+          rm -f "/tmp/iot-ai-runtime-${SHA}.env"
+          cd /opt/iot-ai
+          sudo docker compose -f docker-compose.yml -f docker-compose.oci.yml up -d --build --remove-orphans
+          sudo docker image prune -f
+          curl --fail --silent --show-error http://127.0.0.1:8000/api/status >/dev/null
+          REMOTE
+
+      - name: Publish deployment summary
+        env:
+          DOMAIN: ${{ secrets.DOMAIN }}
+        run: echo "Dashboard URL: https://${DOMAIN}" >> "$GITHUB_STEP_SUMMARY"

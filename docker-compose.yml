@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-iot_dashboard}
+      POSTGRES_USER: ${POSTGRES_USER:-iot_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iot_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iot_user} -d ${POSTGRES_DB:-iot_dashboard}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  dashboard:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-iot_dashboard}
+      DB_USER: ${POSTGRES_USER:-iot_user}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-iot_password}
+      SNAPSHOT_DIR: /app/data/snapshots
+      REARM_SECONDS: 10
+      SENSOR_TIMEOUT_SECONDS: 5
+      ARDUINO_API_KEY: ${ARDUINO_API_KEY:-}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+
+volumes:
+  postgres_data:

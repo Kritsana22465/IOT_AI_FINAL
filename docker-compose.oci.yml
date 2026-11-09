@@ -1,0 +1,29 @@
+services:
+  postgres:
+    restart: unless-stopped
+
+  dashboard:
+    restart: unless-stopped
+    ports: !reset []
+    expose:
+      - "8000"
+    environment:
+      ARDUINO_API_KEY: ${ARDUINO_API_KEY:?ARDUINO_API_KEY is required}
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      dashboard:
+        condition: service_started
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

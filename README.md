@@ -1,87 +1,102 @@
-# IoT Object Detection
+# IoT Vision Dashboard
 
-ตรวจจับ Banana Pi, relay module และ ultrasonic HC-SR04 จากกล้อง พร้อมแสดงจำนวน
-ที่ตรวจพบแยกตามชนิดในแต่ละเฟรม
+ระบบตรวจจับอุปกรณ์ด้วยกล้องและ YOLO โดยใช้ IR Sensor จาก Arduino UNO R4 WiFi เป็นตัวเริ่มรอบการจับภาพ
 
-## ตรวจ label และเทรน
+## Flow การทำงาน
 
-ติดตั้ง dependencies:
+1. Arduino ส่ง `object_present` ผ่าน HTTPS ไปยัง Dashboard
+2. Dashboard สร้างคำขอจับภาพหนึ่งรอบ
+3. หน้าเว็บเปิดกล้องของเบราว์เซอร์และส่งภาพให้ API วิเคราะห์
+4. ระบบบันทึกภาพ เวลา และชื่ออุปกรณ์ลง PostgreSQL
+5. หน้าเว็บปิดกล้องอัตโนมัติหลังบันทึกสำเร็จ
+6. เมื่อ Arduino ส่ง `false` ต่อเนื่องครบ 10 วินาที ระบบจึงพร้อมรับรอบใหม่
+
+สถานะกันการบันทึกซ้ำถูกเก็บใน PostgreSQL จึงไม่เริ่มรอบใหม่เพียงเพราะ container restart
+
+## โครงสร้าง cloud แบบไม่เสียค่าใช้จ่าย
+
+ใช้ Oracle Cloud Always Free VM แบบ ARM ใน region `ap-singapore-1`:
+
+- VM.Standard.A1.Flex: 2 OCPU, RAM 12 GB
+- Docker Compose: Dashboard, PostgreSQL และ Caddy HTTPS
+- PostgreSQL และรูปภาพเก็บบน disk ของ VM
+- Caddy ขอใบรับรอง HTTPS ให้อัตโนมัติ
+- GitHub Actions deploy ทุกครั้งที่ push เข้า `main`
+
+วิธีนี้ไม่ใช้ AWS, S3 หรือบริการเสียเงินเพิ่มเติม แต่ Always Free ยังขึ้นกับ quota และ capacity ของ Oracle Cloud
+
+## รันในเครื่องด้วย Docker
+
+```powershell
+docker compose up --build
+```
+
+เปิด `http://localhost:8000` แล้วอนุญาตสิทธิ์กล้อง รูป local อยู่ที่ `data/snapshots` และข้อมูลอยู่ใน Docker volume
+
+## ตั้งค่า Arduino
+
+แก้ค่าก่อน Upload ในไฟล์ `Project_IoT.ino`:
+
+```cpp
+const char WIFI_SSID[] = "ชื่อ Wi-Fi";
+const char WIFI_PASSWORD[] = "รหัสผ่าน Wi-Fi";
+const char API_HOST[] = "โดเมน HTTPS ของ Dashboard";
+const char API_KEY[] = "ค่าเดียวกับ ARDUINO_API_KEY";
+```
+
+ใช้ `WiFiSSLClient` และพอร์ต `443` ห้ามใช้ `localhost`, `127.0.0.1` หรือ IP ภายในเครื่อง เพราะ Arduino ต้องเข้าถึง VM ผ่านอินเทอร์เน็ต
+
+อย่า commit ค่า Wi-Fi หรือ API key จริงลง GitHub
+
+## Deploy Oracle Cloud ครั้งแรก
+
+สร้าง VM ด้วย Ubuntu ARM และติดตั้ง Docker Compose จากนั้นเตรียมโฟลเดอร์ `/opt/iot-ai` บน VM โดยให้ user `ubuntu` ใช้ SSH ได้
+
+สร้างไฟล์ SSH สำหรับ GitHub Actions บนเครื่องของคุณ แล้วเพิ่ม public key เข้า VM:
+
+```powershell
+ssh-keygen -t ed25519 -f $env:USERPROFILE\.ssh\iot-oci -C iot-ai-oci
+Get-Content $env:USERPROFILE\.ssh\iot-oci.pub
+```
+
+ตั้งค่า GitHub repository secrets:
+
+- `OCI_HOST`: public IP ของ VM
+- `OCI_USER`: `ubuntu`
+- `OCI_SSH_PRIVATE_KEY`: เนื้อหาไฟล์ `iot-oci` (private key)
+- `DOMAIN`: hostname ที่ชี้มาที่ public IP ของ VM เช่น `123.123.123.123.nip.io` หรือโดเมนของคุณ
+- `POSTGRES_PASSWORD`: รหัส PostgreSQL ที่ยาวและสุ่ม
+- `ARDUINO_API_KEY`: API key ที่จะใส่ใน Arduino
+
+จากนั้น push branch `main` ไฟล์ `.github/workflows/deploy-oci.yml` จะทำงานโดยอัตโนมัติ:
+
+- ส่ง source code ไปยัง VM
+- สร้าง Docker image บน VM ARM
+- อัปเดต Dashboard และ PostgreSQL โดยคงข้อมูลเดิมไว้
+- เปิด HTTPS ผ่าน Caddy
+- ตรวจสอบ `/api/status` หลัง deploy
+
+บน VM ให้สร้างไฟล์ `Caddyfile` จากไฟล์ใน repository และเปิด security list/security group เฉพาะพอร์ต `22`, `80`, `443` เท่านั้น
+
+หน้าเว็บ cloud ต้องเปิดผ่าน HTTPS เพื่อให้เบราว์เซอร์อนุญาตกล้อง
+
+## Train model
 
 ```powershell
 py -m pip install -r requirements.txt
-```
-
-สั่งเทรนจากโฟลเดอร์โปรเจกต์:
-
-```powershell
 py train.py
 ```
 
-ค่าเริ่มต้นใช้ YOLO11n ที่เทรนล่วงหน้า 30 epochs และสร้างโมเดลไว้ที่
-`runs/object-detection/iot-components/weights/best.pt` เปลี่ยนจำนวน epochs ได้ เช่น
-`py train.py --epochs 50`
+โมเดลที่ใช้งานคือ `runs/object-detection/iot-components/weights/best.pt`
 
-ก่อนเริ่มเทรน สคริปต์จะตรวจว่าภาพและ label จับคู่ครบ, รูปแบบ YOLO ถูกต้อง,
-ค่ากรอบอยู่ในช่วงที่ใช้ได้ และกรอบไม่ล้นภาพ หากตรวจไม่ผ่านจะหยุดก่อนเทรน
-คลาสจะอิงจากชื่อโฟลเดอร์ เนื่องจากรหัสคลาสเดิมซ้ำกันระหว่างบางโฟลเดอร์
-ชุด validation ใช้เฉพาะภาพต้นฉบับที่กันไว้ทั้งกลุ่ม เพื่อไม่ให้ภาพ augmentation
-ของภาพเดียวกันรั่วจาก train ไป validation
-
-## ใช้กล้อง
+## หยุดระบบ local
 
 ```powershell
-py detect.py
+docker compose down
 ```
 
-กด `q` เพื่อปิดหน้าต่างกล้อง เปลี่ยนกล้องได้ด้วย `py detect.py --source 1`
-หรือใช้ไฟล์วิดีโอด้วย `py detect.py --source "video.mp4"`
-ปรับ confidence threshold ได้ เช่น `py detect.py --conf 0.5`
-และปรับการกรองกรอบซ้ำด้วย `--iou` (ค่าเริ่มต้น `0.25`)
-
-## เปิด Dashboard ในเครื่อง
-
-ติดตั้ง dependencies (รวม FastAPI, Uvicorn และ pyserial):
-
-```powershell
-py -m pip install -r requirements.txt
-```
-
-เปิดเว็บเซิร์ฟเวอร์ที่เครื่องนี้เท่านั้น:
-
-```powershell
-py -m uvicorn app:app --host 127.0.0.1 --port 8000
-```
-
-เปิด `http://127.0.0.1:8000` ในเบราว์เซอร์ แล้วกด **เริ่มกล้อง**
-เลือกกล้องและปรับ confidence ได้บนหน้าเว็บ กด **Ctrl+C** ใน Terminal เพื่อหยุดเซิร์ฟเวอร์
-
-UNO R4 ใช้ได้ทั้ง USB Serial ของ R4 Minima และ R4 WiFi:
-ต่อ USB, เลือกพอร์ต COM ในหน้าเว็บ และเชื่อมต่อที่ 115200 baud
-Arduino ต้องส่ง JSON หนึ่งบรรทัดต่อข้อความ เช่น:
-
-```json
-{"distance_cm":12.5,"object_present":true,"relay":false}
-```
-
-`object_present` เป็น boolean สำหรับ IR sensor: `true` เมื่อมีของบนแท่น และ
-`false` เมื่อแท่นว่าง แดชบอร์ดแสดงความพร้อมของ IR และ HC-SR04 เมื่อได้รับค่า
-ที่ถูกต้องจากเซนเซอร์นั้นภายใน 3 วินาที; หากข้อมูลขาดหายหรือไม่ได้เชื่อมต่อ
-จะแสดงว่าเซนเซอร์ไม่พร้อมใช้งาน
-
-เมื่อกดปุ่มรีเลย์ เว็บส่งคำสั่งกลับเป็น JSON หนึ่งบรรทัด เช่น:
-
-```json
-{"command":"relay","value":true}
-```
-
-เฟิร์มแวร์ Arduino ต้องอ่านคำสั่งและรายงานสถานะ `relay` กลับเอง
-เว็บจะไม่สั่งรีเลย์อัตโนมัติตามผลตรวจจับ ทั้งนี้เบราว์เซอร์หรือโปรแกรมอื่นต้องไม่เปิด COM port เดียวกันอยู่
-เซิร์ฟเวอร์ผูกไว้กับ `127.0.0.1` เพื่อใช้ในเครื่อง ไม่ควรเปลี่ยนเป็น `0.0.0.0`
-หรือเปิดพอร์ตเข้าถึงจากเครือข่ายโดยไม่มีระบบยืนยันตัวตน
+คำสั่งนี้ยังเก็บ PostgreSQL volume และ snapshot ไว้ ถ้าต้องการลบข้อมูล local ทั้งหมดจึงค่อยใช้ `docker compose down -v`
 
 ## ข้อจำกัดของข้อมูล
 
-ชุดข้อมูลมีภาพต้นฉบับเพียงประมาณ 9–10 ภาพต่อคลาส และ augmentation หลายภาพ
-มาจากภาพต้นฉบับชุดเดียวกัน โมเดลจึงเป็นต้นแบบสำหรับทดลอง ไม่ควรคาดหวังความแม่นยำ
-กับมุมกล้องหรือสภาพแสงที่ต่างจากข้อมูลฝึก ควรเพิ่มภาพจริงหลายมุมและหลายสภาพแสง
-ก่อนนำไปใช้งานจริง
+ชุดข้อมูลมีภาพต้นฉบับเพียงประมาณ 9–10 ภาพต่อคลาส โมเดลจึงเหมาะสำหรับต้นแบบ ควรเพิ่มภาพจริงหลายมุมและหลายสภาพแสงก่อนใช้งานจริง
