@@ -20,7 +20,26 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Check deploy configuration
+        id: preflight
+        shell: bash
+        env:
+          OCI_HOST: ${{ secrets.OCI_HOST }}
+          OCI_SSH_PRIVATE_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+          DOMAIN: ${{ secrets.DOMAIN }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          ARDUINO_API_KEY: ${{ secrets.ARDUINO_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$OCI_HOST" || -z "$OCI_SSH_PRIVATE_KEY" || -z "$DOMAIN" || -z "$POSTGRES_PASSWORD" || -z "$ARDUINO_API_KEY" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "OCI deploy secrets are not configured yet; skipping deployment."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Package application
+        if: steps.preflight.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -34,6 +53,7 @@ jobs:
             -czf deploy.tar.gz .
 
       - name: Configure SSH
+        if: steps.preflight.outputs.ready == 'true'
         shell: bash
         env:
           OCI_HOST: ${{ secrets.OCI_HOST }}
@@ -47,6 +67,7 @@ jobs:
           ssh-keyscan -H "$OCI_HOST" >> ~/.ssh/known_hosts
 
       - name: Upload application bundle
+        if: steps.preflight.outputs.ready == 'true'
         shell: bash
         env:
           OCI_HOST: ${{ secrets.OCI_HOST }}
@@ -54,6 +75,7 @@ jobs:
         run: scp deploy.tar.gz "${OCI_USER}@${OCI_HOST}:/tmp/iot-ai-deploy-${GITHUB_SHA}.tar.gz"
 
       - name: Upload runtime secrets
+        if: steps.preflight.outputs.ready == 'true'
         shell: bash
         env:
           OCI_HOST: ${{ secrets.OCI_HOST }}
@@ -70,6 +92,7 @@ jobs:
           rm -f runtime.env
 
       - name: Deploy on Oracle VM
+        if: steps.preflight.outputs.ready == 'true'
         shell: bash
         env:
           OCI_HOST: ${{ secrets.OCI_HOST }}
@@ -90,6 +113,7 @@ jobs:
           REMOTE
 
       - name: Publish deployment summary
+        if: steps.preflight.outputs.ready == 'true'
         env:
           DOMAIN: ${{ secrets.DOMAIN }}
         run: echo "Dashboard URL: https://${DOMAIN}" >> "$GITHUB_STEP_SUMMARY"
