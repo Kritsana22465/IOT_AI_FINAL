@@ -96,7 +96,7 @@ jobs:
         shell: bash
         env:
           AWS_HOST: ${{ secrets.AWS_HOST }}
-          AWS_USER: ${{ secrets.AWS_USER || 'ubuntu' }}
+          AWS_USER: ${{ secrets.AWS_USER || 'ec2-user' }}
         run: scp deploy.tar.gz "${AWS_USER}@${AWS_HOST}:/tmp/iot-ai-deploy-${GITHUB_SHA}.tar.gz"
 
       - name: Upload runtime secrets
@@ -104,7 +104,7 @@ jobs:
         shell: bash
         env:
           AWS_HOST: ${{ secrets.AWS_HOST }}
-          AWS_USER: ${{ secrets.AWS_USER || 'ubuntu' }}
+          AWS_USER: ${{ secrets.AWS_USER || 'ec2-user' }}
           DOMAIN: ${{ secrets.DOMAIN }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           ARDUINO_API_KEY: ${{ secrets.ARDUINO_API_KEY }}
@@ -121,7 +121,7 @@ jobs:
         shell: bash
         env:
           AWS_HOST: ${{ secrets.AWS_HOST }}
-          AWS_USER: ${{ secrets.AWS_USER || 'ubuntu' }}
+          AWS_USER: ${{ secrets.AWS_USER || 'ec2-user' }}
         run: |
           set -euo pipefail
           ssh "${AWS_USER}@${AWS_HOST}" "SHA=${GITHUB_SHA} bash -s" <<'REMOTE'
