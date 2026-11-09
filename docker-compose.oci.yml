@@ -3,6 +3,8 @@ services:
     restart: unless-stopped
 
   dashboard:
+    image: ${DASHBOARD_IMAGE:?DASHBOARD_IMAGE is required}
+    build: !reset null
     restart: unless-stopped
     ports: !reset []
     expose:

@@ -17,7 +17,8 @@
 
 ใช้ Oracle Cloud Always Free VM แบบ ARM ใน region `ap-singapore-1`:
 
-- VM.Standard.A1.Flex: 2 OCPU, RAM 12 GB
+- VM.Standard.A1.Flex: 2 OCPU, RAM 12 GB (Always Free target)
+- หาก A1 ไม่มี capacity ใช้ VM.Standard.E2.1.Micro (Always Free) แล้วให้ GitHub Actions build image แทนบน VM
 - Docker Compose: Dashboard, PostgreSQL และ Caddy HTTPS
 - PostgreSQL และรูปภาพเก็บบน disk ของ VM
 - Caddy ขอใบรับรอง HTTPS ให้อัตโนมัติ
@@ -71,7 +72,7 @@ Get-Content $env:USERPROFILE\.ssh\iot-oci.pub
 จากนั้น push branch `main` ไฟล์ `.github/workflows/deploy-oci.yml` จะทำงานโดยอัตโนมัติ:
 
 - ส่ง source code ไปยัง VM
-- สร้าง Docker image บน VM ARM
+- สร้างและ publish Docker image ไป GHCR ด้วย GitHub Actions
 - อัปเดต Dashboard และ PostgreSQL โดยคงข้อมูลเดิมไว้
 - เปิด HTTPS ผ่าน Caddy
 - ตรวจสอบ `/api/status` หลัง deploy

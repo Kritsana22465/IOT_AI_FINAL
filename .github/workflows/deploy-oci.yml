@@ -8,13 +8,37 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 concurrency:
   group: iot-ai-production
   cancel-in-progress: false
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish dashboard image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/kritsana22465/iot_ai_final-dashboard:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   deploy:
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
@@ -86,7 +110,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          printf 'POSTGRES_DB=iot_dashboard\nPOSTGRES_USER=iot_user\nPOSTGRES_PASSWORD=%s\nARDUINO_API_KEY=%s\nDOMAIN=%s\n' \
+          printf 'POSTGRES_DB=iot_dashboard\nPOSTGRES_USER=iot_user\nPOSTGRES_PASSWORD=%s\nARDUINO_API_KEY=%s\nDOMAIN=%s\nDASHBOARD_IMAGE=ghcr.io/kritsana22465/iot_ai_final-dashboard:latest\n' \
             "$POSTGRES_PASSWORD" "$ARDUINO_API_KEY" "$DOMAIN" > runtime.env
           scp runtime.env "${OCI_USER}@${OCI_HOST}:/tmp/iot-ai-runtime-${GITHUB_SHA}.env"
           rm -f runtime.env
@@ -107,7 +131,8 @@ jobs:
           sudo install -m 600 "/tmp/iot-ai-runtime-${SHA}.env" /opt/iot-ai/.env
           rm -f "/tmp/iot-ai-runtime-${SHA}.env"
           cd /opt/iot-ai
-          sudo docker compose -f docker-compose.yml -f docker-compose.oci.yml up -d --build --remove-orphans
+          sudo docker compose -f docker-compose.yml -f docker-compose.oci.yml pull dashboard
+          sudo docker compose -f docker-compose.yml -f docker-compose.oci.yml up -d --remove-orphans
           sudo docker image prune -f
           curl --fail --silent --show-error http://127.0.0.1:8000/api/status >/dev/null
           REMOTE
