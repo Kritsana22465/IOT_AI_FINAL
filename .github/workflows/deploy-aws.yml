@@ -75,6 +75,7 @@ jobs:
             --exclude=datasetsIOT \
             --exclude=__pycache__ \
             --exclude=.venv \
+            --exclude=deploy.tar.gz \
             -czf deploy.tar.gz .
 
       - name: Configure SSH
