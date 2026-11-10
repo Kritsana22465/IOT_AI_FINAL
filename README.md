@@ -78,7 +78,9 @@ py -m pip install -r requirements.txt
 py train.py
 ```
 
-โมเดลที่ใช้งานคือ `runs/object-detection/iot-components/weights/best.pt`
+แอปและ `detect.py` ใช้โมเดล `best.pt` ที่ root ของโปรเจกต์ โดยมีคลาส Banana Pi,
+Relay module และ Ultrasonic HC-SR04 หากฝึกโมเดลใหม่แล้วต้องการใช้ ให้คัดลอกไฟล์
+`runs/object-detection/iot-components/weights/best.pt` มาทับไฟล์นี้ก่อน build หรือ deploy
 
 ## หยุดระบบ local
 

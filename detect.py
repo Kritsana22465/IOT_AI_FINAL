@@ -8,9 +8,7 @@ from ultralytics import YOLO
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_WEIGHTS = (
-    ROOT / "runs" / "object-detection" / "iot-components" / "weights" / "best.pt"
-)
+DEFAULT_WEIGHTS = ROOT / "best.pt"
 
 
 def main() -> None:
@@ -32,7 +30,7 @@ def main() -> None:
         parser.error("--iou must be between 0 and 1")
     if not args.weights.is_file():
         raise FileNotFoundError(
-            f"Model weights not found: {args.weights}. Run train.py first."
+            f"Model weights not found: {args.weights}"
         )
 
     source: int | str = int(args.source) if args.source.isdecimal() else args.source

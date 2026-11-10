@@ -172,6 +172,10 @@
             <div class="metric-name"><span>Relay module</span><span class="metric-dot" style="background:#ffbd69"></span></div>
             <div class="metric-value" id="count-relay">0</div>
           </article>
+          <article class="metric">
+            <div class="metric-name"><span>Ultrasonic HC-SR04</span><span class="metric-dot" style="background:#72b7ff"></span></div>
+            <div class="metric-value" id="count-ultrasonic">0</div>
+          </article>
         </div>
       </section>
 
@@ -301,7 +305,7 @@
       }
       byId("camera-caption").textContent = cameraRunning
         ? `กล้องเบราว์เซอร์ · ตรวจจับ ${camera.total} วัตถุ`
-        : "YOLO11n · รอเปิดกล้อง";
+        : "โมเดล AI · รอเปิดกล้อง";
       byId("video-message").textContent = camera.error
         || (camera.capture_completed
           ? "บันทึกประวัติแล้ว กำลังปิดกล้อง"
@@ -310,6 +314,7 @@
       const counts = camera.counts || {};
       byId("count-banana").textContent = counts["Banana Pi"] || 0;
       byId("count-relay").textContent = counts["Relay module"] || 0;
+      byId("count-ultrasonic").textContent = counts["Ultrasonic HC-SR04"] || 0;
       byId("total-count").textContent = camera.total || 0;
       if (camera.error) showError(camera.error);
     }

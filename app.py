@@ -26,7 +26,7 @@ from ultralytics import YOLO
 
 
 ROOT = Path(__file__).resolve().parent
-MODEL_PATH = ROOT / "runs" / "object-detection" / "iot-components" / "weights" / "best.pt"
+MODEL_PATH = ROOT / "best.pt"
 PAGE_PATH = ROOT / "web" / "index.html"
 SNAPSHOT_ROOT = Path(
     os.getenv("SNAPSHOT_DIR", str(ROOT / "data" / "snapshots"))
@@ -45,7 +45,12 @@ if not DATABASE_URL:
         f"postgresql://{database_user}:{database_password}"
         f"@{database_host}:{database_port}/{database_name}"
     )
-CLASS_NAMES = ("Banana Pi", "Relay module")
+CLASS_NAMES = ("Banana Pi", "Relay module", "Ultrasonic HC-SR04")
+MODEL_CLASS_LABELS = {
+    "bananapi": "Banana Pi",
+    "relay_module": "Relay module",
+    "ultrasonic_hc-sr04": "Ultrasonic HC-SR04",
+}
 SENSOR_TIMEOUT_SECONDS = float(os.getenv("SENSOR_TIMEOUT_SECONDS", "5"))
 REARM_SECONDS = float(os.getenv("REARM_SECONDS", "10"))
 ARDUINO_API_KEY = os.getenv("ARDUINO_API_KEY", "").strip()
@@ -324,7 +329,7 @@ class CameraService:
     def _load_model(self) -> None:
         if not MODEL_PATH.is_file():
             raise FileNotFoundError(
-                f"ไม่พบโมเดลที่ {MODEL_PATH} กรุณารัน train.py ก่อน"
+                f"ไม่พบไฟล์โมเดลที่ {MODEL_PATH}"
             )
         if self._model is None:
             self._model = YOLO(str(MODEL_PATH))
@@ -435,7 +440,8 @@ class CameraService:
         counts = {name: 0 for name in CLASS_NAMES}
         if result.boxes is not None:
             for class_id in result.boxes.cls.int().tolist():
-                name = result.names[class_id]
+                model_name = result.names[class_id]
+                name = MODEL_CLASS_LABELS.get(model_name)
                 if name in counts:
                     counts[name] += 1
         success, encoded = cv2.imencode(
