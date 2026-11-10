@@ -50,7 +50,7 @@
     .video-empty { position: relative; z-index: 1; padding: 24px; text-align: center; color: var(--muted); pointer-events: none; }
     .video-empty .camera-icon { font-size: 34px; margin-bottom: 8px; }
     .video-frame.active .video-empty { display: none; }
-    .camera-controls { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; padding: 16px 20px 19px; }
+    .camera-controls { display: grid; grid-template-columns: minmax(180px, 1.5fr) 1fr 1fr auto; gap: 10px; align-items: end; padding: 16px 20px 19px; }
     label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
     input, select, button { font: inherit; }
     input, select { width: 100%; color: var(--text); background: #0d1421; border: 1px solid var(--line); border-radius: 9px; padding: 10px 11px; outline: none; }
@@ -153,6 +153,12 @@
           </div>
           <div class="camera-controls">
             <div>
+              <label for="camera-select">กล้องที่จะใช้</label>
+              <select id="camera-select" aria-label="เลือกกล้องที่จะใช้">
+                <option value="">กำลังค้นหากล้อง...</option>
+              </select>
+            </div>
+            <div>
               <label for="confidence">ความมั่นใจขั้นต่ำ</label>
               <input id="confidence" type="number" min="0.1" max="1" step="0.05" value="0.5">
             </div>
@@ -160,7 +166,7 @@
               <label for="iou">กรองกรอบซ้ำ (IoU)</label>
               <input id="iou" type="number" min="0.1" max="1" step="0.05" value="0.25">
             </div>
-            <button id="camera-button" onclick="toggleCamera()">เริ่มกล้อง</button>
+            <button id="camera-button" onclick="toggleCamera()">ทดสอบกล้อง</button>
           </div>
         </div>
         <div class="cards">
@@ -252,6 +258,8 @@
     const byId = (id) => document.getElementById(id);
     let cameraRunning = false;
     let browserStream = null;
+    let cameraTestMode = false;
+    let selectedCameraId = "";
     let frameTimer = null;
     let frameInFlight = false;
     let captureRequestInFlight = false;
@@ -291,21 +299,29 @@
 
     function renderCamera(camera) {
       cameraRunning = camera.running;
-      byId("camera-button").textContent = cameraRunning ? "หยุดกล้อง" : "เริ่มกล้อง";
+      cameraTestMode = cameraRunning && camera.record_events === false;
+      byId("camera-button").textContent = cameraRunning
+        ? (cameraTestMode ? "หยุดทดสอบ" : "หยุดกล้อง")
+        : "ทดสอบกล้อง";
       byId("camera-button").className = cameraRunning ? "danger" : "";
       byId("camera-button").disabled = false;
+      byId("camera-select").disabled = cameraRunning;
       byId("video-frame").classList.toggle("active", cameraRunning);
       if (!cameraRunning) {
         byId("camera-stream").removeAttribute("src");
         byId("video-frame").classList.remove("has-result");
       }
       byId("camera-caption").textContent = cameraRunning
-        ? `กล้องเบราว์เซอร์ · ตรวจจับ ${camera.total} วัตถุ`
+        ? (cameraTestMode
+          ? `โหมดทดสอบ · ไม่บันทึกประวัติ · ตรวจจับ ${camera.total} วัตถุ`
+          : `กล้องเบราว์เซอร์ · ตรวจจับ ${camera.total} วัตถุ`)
         : "YOLO11n · รอเปิดกล้อง";
       byId("video-message").textContent = camera.error
         || (camera.capture_completed
           ? "บันทึกประวัติแล้ว กำลังปิดกล้อง"
-          : "เมื่อ IR ตรวจพบอุปกรณ์ ระบบจะเปิดกล้องและบันทึกให้อัตโนมัติ");
+          : cameraTestMode
+            ? "กำลังทดสอบกล้อง ภาพจะไม่ถูกบันทึกลงประวัติ"
+            : "เมื่อ IR ตรวจพบอุปกรณ์ ระบบจะเปิดกล้องและบันทึกให้อัตโนมัติ");
       byId("fps").textContent = cameraRunning ? `${camera.fps} FPS` : "-- FPS";
       const counts = camera.counts || {};
       byId("count-banana").textContent = counts["Banana Pi"] || 0;
@@ -396,26 +412,71 @@
       }
     }
 
-    async function startBrowserCamera(triggerId = null) {
+    async function refreshCameraList(preferredId = selectedCameraId) {
+      const select = byId("camera-select");
+      if (!navigator.mediaDevices?.enumerateDevices) {
+        select.replaceChildren(new Option("เบราว์เซอร์ไม่รองรับการเลือกกล้อง", ""));
+        select.disabled = true;
+        selectedCameraId = "";
+        return;
+      }
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cameras = devices.filter((device) => device.kind === "videoinput");
+        select.replaceChildren();
+        if (!cameras.length) {
+          select.append(new Option("ไม่พบกล้องในอุปกรณ์", ""));
+          select.disabled = true;
+          selectedCameraId = "";
+          return;
+        }
+        cameras.forEach((device, index) => {
+          const label = device.label || `กล้อง ${index + 1}`;
+          select.append(new Option(label, device.deviceId));
+        });
+        const nextId = cameras.some((device) => device.deviceId === preferredId)
+          ? preferredId
+          : cameras[0].deviceId;
+        select.value = nextId;
+        selectedCameraId = nextId;
+        select.disabled = cameraRunning;
+      } catch (error) {
+        select.replaceChildren(new Option("ค้นหากล้องไม่ได้", ""));
+        select.disabled = true;
+        selectedCameraId = "";
+        showError(`ค้นหากล้องไม่ได้: ${error.message}`);
+      }
+    }
+
+    async function startBrowserCamera(triggerId = null, recordEvents = false) {
+      const deviceId = byId("camera-select").value || selectedCameraId;
       const cameraState = await request("/api/camera/start", {
         method: "POST",
         body: JSON.stringify({
           confidence: Number(byId("confidence").value),
           iou: Number(byId("iou").value),
           mode: "browser",
-          trigger_id: triggerId
+          trigger_id: triggerId,
+          record_events: recordEvents
         })
       });
       renderCamera(cameraState);
       try {
+        const videoConstraints = {
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        };
+        if (deviceId) videoConstraints.deviceId = { exact: deviceId };
         browserStream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: videoConstraints,
           audio: false
         });
         const video = byId("camera-preview");
         video.srcObject = browserStream;
         await video.play();
         cameraRunning = true;
+        cameraTestMode = !recordEvents;
+        await refreshCameraList(deviceId);
         frameTimer = setInterval(sendCameraFrame, 700);
         await sendCameraFrame();
       } catch (error) {
@@ -431,6 +492,7 @@
       browserStream = null;
       byId("camera-preview").srcObject = null;
       cameraRunning = false;
+      cameraTestMode = false;
       await request("/api/camera/stop", { method: "POST" });
     }
 
@@ -439,7 +501,7 @@
       button.disabled = true;
       try {
         if (cameraRunning) await stopBrowserCamera();
-        else await startBrowserCamera();
+        else await startBrowserCamera(null, false);
         await refreshStatus();
       } catch (error) {
         showError(error.message);
@@ -452,10 +514,13 @@
       const requestId = arduino.capture_request_id;
       if (!arduino.capture_pending || !requestId || requestId === lastCaptureRequestId) return;
       if (captureRequestInFlight || Date.now() < captureRetryAt) return;
-      if (cameraRunning) return;
       captureRequestInFlight = true;
       try {
-        await startBrowserCamera(requestId);
+        if (cameraRunning) {
+          if (!cameraTestMode) return;
+          await stopBrowserCamera();
+        }
+        await startBrowserCamera(requestId, true);
         await request("/api/capture/ack", {
           method: "POST",
           body: JSON.stringify({ request_id: requestId })
@@ -523,6 +588,10 @@
     byId("event-modal").addEventListener("click", (event) => {
       if (event.target === byId("event-modal")) closeEvent();
     });
+    byId("camera-select").addEventListener("change", (event) => {
+      selectedCameraId = event.target.value;
+    });
+    refreshCameraList();
     refreshStatus();
     refreshEvents();
     setInterval(refreshStatus, 1000);
