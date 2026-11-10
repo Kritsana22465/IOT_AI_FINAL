@@ -422,15 +422,15 @@ class MqttReceivingService:
             if (
                 job is None
                 or job["job_id"] != job_id
-                or job["status"] != "waiting_camera"
+                or job["status"] != "waiting_ir"
             ):
-                raise ValueError("MQTT receiving request is no longer waiting")
+                raise ValueError("MQTT receiving request is not waiting for IR")
             job["status"] = "in_progress"
-            job["message"] = "กำลังตรวจนับอุปกรณ์"
+            job["message"] = "IR ตรวจพบอุปกรณ์ · กำลังตรวจนับอุปกรณ์"
             job_state = self._job_snapshot_locked()
         self._publish_job_state(job_state, "processing")
 
-    def observe(self, job_id: str, counts: dict[str, int]) -> None:
+    def observe(self, job_id: str, counts: dict[str, int]) -> dict[str, Any] | None:
         job_state: dict[str, Any] | None = None
         event_type = "progress"
         with self._lock:
@@ -467,6 +467,7 @@ class MqttReceivingService:
 
         if job_state is not None:
             self._publish_job_state(job_state, event_type)
+        return job_state
 
     def _on_connect(
         self,
@@ -635,11 +636,11 @@ class MqttReceivingService:
                 result = self._job_snapshot_locked()
                 event_type = (
                     "processing"
-                    if job["status"] in ("waiting_camera", "in_progress")
+                    if job["status"] in ("waiting_ir", "in_progress")
                     else job["status"]
                 )
             elif job is not None and job["status"] in (
-                "waiting_camera",
+                "waiting_ir",
                 "in_progress",
             ):
                 result = None
@@ -647,13 +648,13 @@ class MqttReceivingService:
             else:
                 self._job = {
                     "job_id": request.job_id,
-                    "status": "waiting_camera",
+                    "status": "waiting_ir",
                     "requested": requested,
                     "detected": {name: 0 for name in requested},
                     "item_id": item_id,
                     "source": source,
                     "success": False,
-                    "message": "รอเปิดกล้อง Dashboard",
+                    "message": "รอ IR ตรวจพบอุปกรณ์",
                 }
                 self._deadline = time.monotonic() + MQTT_RECEIVE_TIMEOUT_SECONDS
                 if self._timer is not None:
@@ -684,7 +685,7 @@ class MqttReceivingService:
             if (
                 self._job is None
                 or self._job["job_id"] != job_id
-                or self._job["status"] not in ("waiting_camera", "in_progress")
+                or self._job["status"] not in ("waiting_ir", "in_progress")
             ):
                 return
             result = self._finish_locked("incomplete", "หมดเวลา รับของไม่ครบ")
@@ -754,7 +755,7 @@ class MqttReceivingService:
             return
         event_status = (
             "processing"
-            if job["status"] in ("waiting_camera", "in_progress")
+            if job["status"] in ("waiting_ir", "in_progress")
             else job["status"]
         )
         self._publish_event(
@@ -775,7 +776,7 @@ class MqttReceivingService:
             {
                 "state": (
                     "busy"
-                    if job["status"] in ("waiting_camera", "in_progress")
+                    if job["status"] in ("waiting_ir", "in_progress")
                     else "ready"
                 ),
                 "current_item": job.get("item_id"),
@@ -1010,8 +1011,41 @@ class CameraService:
             if event_to_save:
                 self._event_saved = True
             receiving_job_id = self._state["receiving_job_id"]
+        receiving_job_state: dict[str, Any] | None = None
         if receiving_job_id is not None:
-            self._receiving_service.observe(receiving_job_id, counts)
+            receiving_job_state = self._receiving_service.observe(
+                receiving_job_id, counts
+            )
+        if (
+            receiving_job_state is not None
+            and receiving_job_state["status"] in ("completed", "incomplete")
+        ):
+            with self._lock:
+                receiving_event_to_save = not self._event_saved
+                if receiving_event_to_save:
+                    self._event_saved = True
+            if receiving_event_to_save and receiving_job_state["detected_count"] > 0:
+                labels = {
+                    name: progress["detected"]
+                    for name, progress in receiving_job_state["progress"].items()
+                    if progress["detected"]
+                }
+                try:
+                    event = self._event_store.create(
+                        jpeg,
+                        labels,
+                        receiving_job_state["detected_count"],
+                    )
+                    with self._lock:
+                        self._state["last_event_id"] = event["id"]
+                        self._state["last_event_at"] = event["detected_at"]
+                        self._state["capture_completed"] = True
+                except Exception as error:
+                    with self._lock:
+                        self._event_saved = False
+                        self._state["error"] = (
+                            f"บันทึกรูปเหตุการณ์ไม่ได้: {error}"
+                        )
         if event_to_save:
             labels = {name: count for name, count in counts.items() if count}
             try:

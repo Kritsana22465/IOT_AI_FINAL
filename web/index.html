@@ -87,6 +87,9 @@
     .error.visible { display: block; }
     .notice { margin-top: 16px; padding: 12px 14px; color: var(--muted); font-size: 12px; border: 1px solid var(--line); border-radius: 11px; }
     .notice strong { color: var(--amber); }
+    .notice.receiving-completed { color: var(--green); border-color: #34795b; }
+    .notice.receiving-incomplete { color: var(--red); border-color: #713744; }
+    .notice.receiving-in_progress { color: var(--cyan); border-color: #2f6f78; }
     .event-list { display: grid; gap: 10px; padding: 16px 20px 20px; max-height: 350px; overflow-y: auto; }
     .event-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%; padding: 9px; color: var(--text); text-align: left; background: #0f1726; border: 1px solid var(--line); border-radius: 11px; }
     .event-item:hover { border-color: var(--cyan); }
@@ -277,9 +280,7 @@
     let lastCaptureRequestId = null;
     let captureRetryAt = 0;
     let captureClosing = false;
-    let receivingCameraStartInFlight = false;
     let receivingCameraStopInFlight = false;
-    let receivingRetryAt = 0;
     let errorTimer;
 
     async function request(path, options = {}) {
@@ -387,7 +388,6 @@
       renderArduino(data.arduino);
       renderReceiving(data.receiving);
       maybeStopReceivingCamera(data.camera, data.receiving);
-      maybeStartReceivingCapture(data.receiving);
       maybeStartTriggeredCapture(data.arduino, data.receiving);
       const online = data.camera.running || data.arduino.connected
         || data.receiving?.connected;
@@ -397,6 +397,7 @@
 
     function renderReceiving(receiving) {
       const box = byId("receiving-status");
+      box.className = "notice";
       if (!receiving?.connected) {
         box.textContent = `MQTT: ยังไม่เชื่อมต่อ${receiving?.error ? ` · ${receiving.error}` : ""}`;
         return;
@@ -409,7 +410,14 @@
       const progress = Object.entries(job.progress || {})
         .map(([name, count]) => `${name} ${count.detected}/${count.requested}`)
         .join(" · ");
-      box.textContent = `MQTT ${job.job_id}: ${progress} · ${job.message}`;
+      const statusLabel = {
+        waiting_ir: "รอ IR ตรวจพบอุปกรณ์",
+        in_progress: "กำลังตรวจสอบอุปกรณ์",
+        completed: "อุปกรณ์ครบ",
+        incomplete: "อุปกรณ์ไม่ครบ"
+      }[job.status] || job.status;
+      box.classList.add(`receiving-${job.status}`);
+      box.textContent = `สถานะรับอุปกรณ์: ${statusLabel} · ${progress} · ${job.message}`;
     }
 
     async function refreshStatus() {
@@ -418,25 +426,6 @@
       } catch (error) {
         byId("system-status").textContent = "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้";
         showError(error.message);
-      }
-    }
-
-    async function maybeStartReceivingCapture(receiving) {
-      const job = receiving?.job;
-      if (!job || job.status !== "waiting_camera") {
-        return;
-      }
-      if (receivingCameraStartInFlight || Date.now() < receivingRetryAt) return;
-      if (cameraRunning && !cameraTestMode) return;
-      receivingCameraStartInFlight = true;
-      try {
-        if (cameraRunning) await stopBrowserCamera();
-        await startBrowserCamera(null, false, job.job_id);
-      } catch (error) {
-        receivingRetryAt = Date.now() + 5000;
-        showError(`เปิดกล้องสำหรับ MQTT ไม่ได้: ${error.message}`);
-      } finally {
-        receivingCameraStartInFlight = false;
       }
     }
 
@@ -598,7 +587,8 @@
     }
 
     async function maybeStartTriggeredCapture(arduino, receiving) {
-      if (["waiting_camera", "in_progress"].includes(receiving?.job?.status)) return;
+      const job = receiving?.job;
+      if (job && job.status !== "waiting_ir") return;
       const requestId = arduino.capture_request_id;
       if (!arduino.capture_pending || !requestId || requestId === lastCaptureRequestId) return;
       if (captureRequestInFlight || Date.now() < captureRetryAt) return;
@@ -608,7 +598,8 @@
           if (!cameraTestMode) return;
           await stopBrowserCamera();
         }
-        await startBrowserCamera(requestId, true);
+        const receivingJobId = job?.job_id || null;
+        await startBrowserCamera(requestId, receivingJobId ? false : true, receivingJobId);
         await request("/api/capture/ack", {
           method: "POST",
           body: JSON.stringify({ request_id: requestId })
