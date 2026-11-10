@@ -62,6 +62,7 @@ class CameraRequest(BaseModel):
     iou: float = Field(default=0.25, ge=0, le=1)
     mode: Literal["browser", "local"] = "browser"
     trigger_id: str | None = Field(default=None, max_length=100)
+    record_events: bool = True
 
 
 class IRSensorRequest(BaseModel):
@@ -312,9 +313,11 @@ class CameraService:
         self._last_frame_time: float | None = None
         self._event_saved = False
         self._frames_processed = 0
+        self._record_events = True
         self._state: dict[str, Any] = {
             "running": False,
             "camera_index": None,
+            "record_events": True,
             "counts": {name: 0 for name in CLASS_NAMES},
             "total": 0,
             "fps": 0,
@@ -341,14 +344,19 @@ class CameraService:
             return state
 
     def _reset_state(
-        self, camera_index: str | int | None, trigger_id: str | None = None
+        self,
+        camera_index: str | int | None,
+        trigger_id: str | None = None,
+        record_events: bool = True,
     ) -> None:
         self._event_saved = False
         self._frames_processed = 0
+        self._record_events = record_events
         self._state.update(
             {
                 "running": camera_index is not None,
                 "camera_index": camera_index,
+                "record_events": record_events,
                 "counts": {name: 0 for name in CLASS_NAMES},
                 "total": 0,
                 "fps": 0,
@@ -378,7 +386,7 @@ class CameraService:
             self._worker = None
             self._running = True
             self._last_frame_time = None
-            self._reset_state("browser", request.trigger_id)
+            self._reset_state("browser", request.trigger_id, request.record_events)
 
     def start_local(self, request: CameraRequest) -> None:
         with self._lock:
@@ -400,7 +408,7 @@ class CameraService:
             self._capture = capture
             self._running = True
             self._last_frame_time = None
-            self._reset_state(request.index, request.trigger_id)
+            self._reset_state(request.index, request.trigger_id, request.record_events)
             self._worker = threading.Thread(
                 target=self._process_local_frames,
                 args=(capture,),
@@ -452,7 +460,7 @@ class CameraService:
         return encoded.tobytes(), counts, sum(counts.values())
 
     def _publish(self, jpeg: bytes, counts: dict[str, int], total: int) -> None:
-        event_to_save = total > 0
+        event_to_save = self._record_events and total > 0
         with self._lock:
             self._jpeg = jpeg
             self._state.update(
@@ -465,7 +473,8 @@ class CameraService:
                 }
             )
             event_to_save = (
-                (event_to_save or self._state["capture_trigger_id"] is not None)
+                self._record_events
+                and (event_to_save or self._state["capture_trigger_id"] is not None)
                 and self._frames_processed >= 2
                 and not self._event_saved
             )
