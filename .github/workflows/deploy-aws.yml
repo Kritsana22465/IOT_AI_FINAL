@@ -134,6 +134,8 @@ jobs:
           sudo install -m 600 "/tmp/iot-ai-runtime-${SHA}.env" /opt/iot-ai/.env
           rm -f "/tmp/iot-ai-runtime-${SHA}.env"
           cd /opt/iot-ai
+          sudo docker-compose --env-file .env -f docker-compose.yml -f docker-compose.aws.yml rm -sf dashboard
+          sudo docker image rm --force iot-ai-dashboard:latest || true
           sudo docker builder prune --all --force
           sudo docker image prune --all --force
           sudo docker-compose --env-file .env -f docker-compose.yml -f docker-compose.aws.yml up -d --build --remove-orphans
