@@ -88,11 +88,15 @@
     .notice { margin-top: 16px; padding: 12px 14px; color: var(--muted); font-size: 12px; border: 1px solid var(--line); border-radius: 11px; }
     .notice strong { color: var(--amber); }
     .event-list { display: grid; gap: 10px; padding: 16px 20px 20px; max-height: 350px; overflow-y: auto; }
-    .event-item { display: grid; grid-template-columns: 76px 1fr; gap: 11px; width: 100%; padding: 9px; color: var(--text); text-align: left; background: #0f1726; border: 1px solid var(--line); border-radius: 11px; }
+    .event-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%; padding: 9px; color: var(--text); text-align: left; background: #0f1726; border: 1px solid var(--line); border-radius: 11px; }
     .event-item:hover { border-color: var(--cyan); }
+    .event-open { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 11px; align-items: center; width: 100%; min-width: 0; padding: 0; color: var(--text); text-align: left; background: transparent; border: 0; }
+    .event-open:hover { filter: none; }
     .event-thumb { width: 76px; height: 58px; object-fit: cover; border-radius: 7px; background: #070a10; }
     .event-time { font-size: 13px; font-weight: 700; }
     .event-labels { margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .event-delete { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; color: var(--red); background: transparent; border: 1px solid transparent; border-radius: 8px; font-size: 23px; font-weight: 400; line-height: 1; }
+    .event-delete:hover { color: #ffd9dc; background: #472833; border-color: #713744; }
     .event-empty { color: var(--muted); font-size: 12px; text-align: center; padding: 12px 0; }
     .modal { display: none; position: fixed; inset: 0; z-index: 10; place-items: center; padding: 22px; background: #0009; }
     .modal.visible { display: grid; }
@@ -630,10 +634,12 @@
           return;
         }
         for (const event of events) {
-          const item = document.createElement("button");
+          const item = document.createElement("div");
           item.className = "event-item";
-          item.type = "button";
-          item.onclick = () => openEvent(event.id);
+          const openButton = document.createElement("button");
+          openButton.className = "event-open";
+          openButton.type = "button";
+          openButton.onclick = () => openEvent(event.id);
           const image = document.createElement("img");
           image.className = "event-thumb";
           image.src = `${event.image_url}?v=${event.id}`;
@@ -646,10 +652,34 @@
           labels.className = "event-labels";
           labels.textContent = labelsText(event.labels);
           details.append(time, labels);
-          item.append(image, details);
+          openButton.append(image, details);
+          const deleteButton = document.createElement("button");
+          deleteButton.className = "event-delete";
+          deleteButton.type = "button";
+          deleteButton.textContent = "×";
+          deleteButton.title = "ลบรูปและประวัติรายการนี้";
+          deleteButton.setAttribute("aria-label", "ลบรูปและประวัติรายการนี้");
+          deleteButton.onclick = (clickEvent) => {
+            clickEvent.stopPropagation();
+            deleteEvent(event.id, deleteButton);
+          };
+          item.append(openButton, deleteButton);
           list.append(item);
         }
       } catch (error) {
+        showError(error.message);
+      }
+    }
+
+    async function deleteEvent(eventId, button) {
+      if (!window.confirm("ลบรูปและประวัติรายการนี้ใช่หรือไม่?")) return;
+      button.disabled = true;
+      try {
+        await request(`/api/events/${eventId}`, { method: "DELETE" });
+        closeEvent();
+        await refreshEvents();
+      } catch (error) {
+        button.disabled = false;
         showError(error.message);
       }
     }

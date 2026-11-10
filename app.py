@@ -284,6 +284,28 @@ class EventStore:
             ).fetchone()
         return self._payload(row) if row is not None else None
 
+    def delete(self, event_id: int) -> bool:
+        with self.connection() as connection:
+            row = connection.execute(
+                """
+                SELECT image_path, image_data
+                FROM device_events
+                WHERE id = %s
+                """,
+                (event_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            connection.execute(
+                "DELETE FROM device_events WHERE id = %s",
+                (event_id,),
+            )
+            connection.commit()
+
+        if row["image_data"] is None:
+            self._delete_image(row["image_path"])
+        return True
+
     def image_bytes(self, event_id: int) -> bytes | None:
         with self.connection() as connection:
             row = connection.execute(
@@ -1166,6 +1188,17 @@ def get_event(event_id: int) -> dict[str, Any]:
     if event is None:
         raise HTTPException(status_code=404, detail="ไม่พบรายการเหตุการณ์")
     return event
+
+
+@app.delete("/api/events/{event_id}")
+def delete_event(event_id: int) -> dict[str, Any]:
+    try:
+        deleted = event_store.delete(event_id)
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"ลบประวัติไม่ได้: {error}") from error
+    if not deleted:
+        raise HTTPException(status_code=404, detail="ไม่พบรายการเหตุการณ์")
+    return {"deleted": True, "id": event_id}
 
 
 @app.post("/api/capture/ack")
