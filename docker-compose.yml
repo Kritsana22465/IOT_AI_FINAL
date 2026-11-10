@@ -29,7 +29,7 @@ services:
       REARM_SECONDS: 10
       SENSOR_TIMEOUT_SECONDS: 5
       ARDUINO_API_KEY: ${ARDUINO_API_KEY:-}
-      MQTT_HOST: ${MQTT_HOST:-mqtt.panplay-itgoeasy.xyz}
+      MQTT_HOST: ${MQTT_HOST:-broker.hivemq.com}
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USERNAME: ${MQTT_USERNAME:-}
       MQTT_PASSWORD: ${MQTT_PASSWORD:-}

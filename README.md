@@ -50,7 +50,7 @@ const char API_KEY[] = "ค่าเดียวกับ ARDUINO_API_KEY";
 
 ## รับรายการอุปกรณ์ผ่าน MQTT
 
-Dashboard เชื่อมต่อ broker `mqtt.panplay-itgoeasy.xyz:1883` โดย subscribe topic
+Dashboard เชื่อมต่อ broker `broker.hivemq.com:1883` โดยใช้ prefix `armbot` และ subscribe topic
 `armbot/cmd/queue`, publish event ไปที่ `armbot/event` และ publish retained status
 ไปที่ `armbot/status` สามารถกำหนด `MQTT_HOST`, `MQTT_PORT`, `MQTT_QUEUE_TOPIC`,
 `MQTT_EVENT_TOPIC`, `MQTT_STATUS_TOPIC` และ `MQTT_RECEIVE_TIMEOUT_SECONDS`
@@ -99,7 +99,8 @@ event `completed` พร้อม status `ready` หากครบ 120 วิ�
 - `DOMAIN`: เช่น `12.34.56.78.nip.io` โดยแทนด้วย Elastic IP จริง หรือใช้โดเมนของคุณ
 - `POSTGRES_PASSWORD`: รหัส PostgreSQL ที่ยาวและสุ่ม
 - `ARDUINO_API_KEY`: API key ที่จะใส่ใน Arduino
-- `MQTT_USERNAME` และ `MQTT_PASSWORD`: credential ของ broker (ถ้ากำหนดให้ใช้)
+- `MQTT_HOST` และ `MQTT_PORT`: ไม่จำเป็น ค่าเริ่มต้นคือ `broker.hivemq.com:1883`
+- `MQTT_USERNAME` และ `MQTT_PASSWORD`: credential ของ broker ส่วนตัว (ค่าเริ่มต้น HiveMQ ไม่ต้องใช้)
 
 จากนั้น workflow `.github/workflows/deploy-aws.yml` จะทำงานอัตโนมัติ:
 
