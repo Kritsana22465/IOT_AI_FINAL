@@ -53,6 +53,11 @@ MODEL_CLASS_LABELS = {
     "relay_module": "Relay module",
     "ultrasonic_hc-sr04": "Ultrasonic HC-SR04",
 }
+ITEM_TO_YOLO_CLASS = {
+    "relay": "relay_module",
+    "ultrasonic": "ultrasonic_hc-sr04",
+    "bananapi": "bananapi",
+}
 SENSOR_TIMEOUT_SECONDS = float(os.getenv("SENSOR_TIMEOUT_SECONDS", "5"))
 REARM_SECONDS = float(os.getenv("REARM_SECONDS", "10"))
 ARDUINO_API_KEY = os.getenv("ARDUINO_API_KEY", "").strip()
@@ -60,10 +65,9 @@ MQTT_HOST = os.getenv("MQTT_HOST", "mqtt.panplay-itgoeasy.xyz").strip()
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME", "").strip()
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
-MQTT_REQUEST_TOPIC = os.getenv(
-    "MQTT_REQUEST_TOPIC", "iot/receiving/request"
-).strip()
-MQTT_RESULT_TOPIC = os.getenv("MQTT_RESULT_TOPIC", "iot/receiving/result").strip()
+MQTT_QUEUE_TOPIC = os.getenv("MQTT_QUEUE_TOPIC", "armbot/cmd/queue").strip()
+MQTT_EVENT_TOPIC = os.getenv("MQTT_EVENT_TOPIC", "armbot/event").strip()
+MQTT_STATUS_TOPIC = os.getenv("MQTT_STATUS_TOPIC", "armbot/status").strip()
 MQTT_RECEIVE_TIMEOUT_SECONDS = float(
     os.getenv("MQTT_RECEIVE_TIMEOUT_SECONDS", "120")
 )
@@ -336,7 +340,9 @@ class MqttReceivingService:
         self._mqtt_error: str | None = None
 
     def start(self) -> None:
-        if not MQTT_HOST or not MQTT_REQUEST_TOPIC or not MQTT_RESULT_TOPIC:
+        if not all(
+            (MQTT_HOST, MQTT_QUEUE_TOPIC, MQTT_EVENT_TOPIC, MQTT_STATUS_TOPIC)
+        ):
             raise RuntimeError("MQTT host and topic settings must not be empty")
         if not 1 <= MQTT_PORT <= 65535:
             raise RuntimeError("MQTT_PORT must be between 1 and 65535")
@@ -399,11 +405,12 @@ class MqttReceivingService:
                 raise ValueError("MQTT receiving request is no longer waiting")
             job["status"] = "in_progress"
             job["message"] = "กำลังตรวจนับอุปกรณ์"
-            result = self._job_snapshot_locked()
-        self._publish(result)
+            job_state = self._job_snapshot_locked()
+        self._publish_job_state(job_state, "processing")
 
     def observe(self, job_id: str, counts: dict[str, int]) -> None:
-        result: dict[str, Any] | None = None
+        job_state: dict[str, Any] | None = None
+        event_type = "progress"
         with self._lock:
             job = self._job
             if (
@@ -425,17 +432,19 @@ class MqttReceivingService:
                 for name, quantity in job["requested"].items()
             )
             if complete:
-                result = self._finish_locked("completed", "รับของเรียบร้อย")
+                job_state = self._finish_locked("completed", "รับของเรียบร้อย")
+                event_type = "completed"
             elif self._deadline is not None and time.monotonic() >= self._deadline:
-                result = self._finish_locked(
+                job_state = self._finish_locked(
                     "incomplete", "หมดเวลา รับของไม่ครบ"
                 )
+                event_type = "incomplete"
             elif changed:
                 job["message"] = "กำลังตรวจนับอุปกรณ์"
-                result = self._job_snapshot_locked()
+                job_state = self._job_snapshot_locked()
 
-        if result is not None:
-            self._publish(result)
+        if job_state is not None:
+            self._publish_job_state(job_state, event_type)
 
     def _on_connect(
         self,
@@ -452,7 +461,7 @@ class MqttReceivingService:
                 self._mqtt_error = error
             LOGGER.error(error)
             return
-        result, _ = client.subscribe(MQTT_REQUEST_TOPIC, qos=1)
+        result, _ = client.subscribe(MQTT_QUEUE_TOPIC, qos=1)
         with self._lock:
             self._mqtt_connected = result == mqtt.MQTT_ERR_SUCCESS
             self._mqtt_error = (
@@ -491,6 +500,41 @@ class MqttReceivingService:
         payload: Any = None
         try:
             payload = json.loads(message.payload.decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise TypeError("MQTT payload must be a JSON object")
+
+            source = payload.get("source", "mqtt")
+            if not isinstance(source, str):
+                raise TypeError("source must be a string")
+
+            item_id = payload.get("item_id") or payload.get("text")
+            if item_id is not None:
+                if not isinstance(item_id, str):
+                    raise TypeError("item_id must be a string")
+                yolo_class = ITEM_TO_YOLO_CLASS.get(item_id.strip().lower())
+                if yolo_class is None:
+                    LOGGER.warning("Unknown MQTT item_id: %s", item_id)
+                    self._publish_event(
+                        {
+                            "type": "unknown",
+                            "item_id": item_id,
+                            "source": source,
+                        }
+                    )
+                    return
+
+                quantity = payload.get("count", payload.get("quantity", 1))
+                request = ReceivingRequest(
+                    job_id=str(payload.get("job_id") or uuid.uuid4().hex),
+                    items=[{"class": yolo_class, "quantity": quantity}],
+                )
+                self.submit(
+                    request,
+                    item_id=item_id.strip().lower(),
+                    source=source,
+                )
+                return
+
             request = ReceivingRequest(**payload)
         except (
             UnicodeDecodeError,
@@ -499,36 +543,50 @@ class MqttReceivingService:
             ValidationError,
         ) as error:
             LOGGER.warning("Ignoring invalid MQTT receiving request: %s", error)
-            job_id = payload.get("job_id") if isinstance(payload, dict) else None
-            if isinstance(job_id, str) and job_id:
-                self._publish(
-                    {
-                        "job_id": job_id[:100],
-                        "status": "rejected",
-                        "success": False,
-                        "message": "รูปแบบรายการ MQTT ไม่ถูกต้อง",
-                    }
-                )
-            return
-        self.submit(request)
-
-    def submit(self, request: ReceivingRequest) -> None:
-        if not request.items:
-            self._publish(
+            self._publish_event(
                 {
+                    "type": "rejected",
+                    "job_id": payload.get("job_id") if isinstance(payload, dict) else None,
+                    "message": "รูปแบบรายการ MQTT ไม่ถูกต้อง",
+                }
+            )
+            return
+        item_id = None
+        if len(request.items) == 1:
+            item_id = next(
+                (
+                    alias
+                    for alias, model_class in ITEM_TO_YOLO_CLASS.items()
+                    if model_class == request.items[0].equipment
+                ),
+                None,
+            )
+        self.submit(
+            request,
+            item_id=item_id,
+            source=payload.get("source", "mqtt"),
+        )
+
+    def submit(
+        self,
+        request: ReceivingRequest,
+        item_id: str | None = None,
+        source: str = "mqtt",
+    ) -> None:
+        if not request.items:
+            self._publish_event(
+                {
+                    "type": "rejected",
                     "job_id": request.job_id,
-                    "status": "rejected",
-                    "success": False,
                     "message": "ต้องระบุอุปกรณ์อย่างน้อยหนึ่งรายการ",
                 }
             )
             return
         if len(request.items) > 3:
-            self._publish(
+            self._publish_event(
                 {
+                    "type": "rejected",
                     "job_id": request.job_id,
-                    "status": "rejected",
-                    "success": False,
                     "message": "ระบุอุปกรณ์ได้สูงสุด 3 ประเภท",
                 }
             )
@@ -539,35 +597,39 @@ class MqttReceivingService:
             name = MODEL_CLASS_LABELS[item.equipment]
             requested[name] = requested.get(name, 0) + item.quantity
             if requested[name] > 100:
-                self._publish(
+                self._publish_event(
                     {
+                        "type": "rejected",
                         "job_id": request.job_id,
-                        "status": "rejected",
-                        "success": False,
                         "message": "จำนวนต่ออุปกรณ์ต้องไม่เกิน 100",
                     }
                 )
                 return
+        accepted = True
+        event_type = "queued"
         with self._lock:
             job = self._job
             if job is not None and job["job_id"] == request.job_id:
                 result = self._job_snapshot_locked()
+                event_type = (
+                    "processing"
+                    if job["status"] in ("waiting_camera", "in_progress")
+                    else job["status"]
+                )
             elif job is not None and job["status"] in (
                 "waiting_camera",
                 "in_progress",
             ):
-                result = {
-                    "job_id": request.job_id,
-                    "status": "rejected",
-                    "success": False,
-                    "message": "มีงานรับอุปกรณ์อื่นกำลังทำงานอยู่",
-                }
+                result = None
+                accepted = False
             else:
                 self._job = {
                     "job_id": request.job_id,
                     "status": "waiting_camera",
                     "requested": requested,
                     "detected": {name: 0 for name in requested},
+                    "item_id": item_id,
+                    "source": source,
                     "success": False,
                     "message": "รอเปิดกล้อง Dashboard",
                 }
@@ -582,7 +644,18 @@ class MqttReceivingService:
                 self._timer.daemon = True
                 self._timer.start()
                 result = self._job_snapshot_locked()
-        self._publish(result)
+        if not accepted:
+            self._publish_event(
+                {
+                    "type": "rejected",
+                    "job_id": request.job_id,
+                    "item_id": item_id,
+                    "source": source,
+                    "message": "มีงานรับอุปกรณ์อื่นกำลังทำงานอยู่",
+                }
+            )
+            return
+        self._publish_job_state(result, event_type)
 
     def _expire(self, job_id: str) -> None:
         with self._lock:
@@ -593,7 +666,7 @@ class MqttReceivingService:
             ):
                 return
             result = self._finish_locked("incomplete", "หมดเวลา รับของไม่ครบ")
-        self._publish(result)
+        self._publish_job_state(result, "incomplete")
 
     def _finish_locked(self, status: str, message: str) -> dict[str, Any]:
         if self._job is None:
@@ -620,26 +693,101 @@ class MqttReceivingService:
             }
             for name, quantity in self._job["requested"].items()
         }
+        job["count"] = sum(self._job["requested"].values())
+        job["detected_count"] = sum(
+            min(self._job["detected"][name], quantity)
+            for name, quantity in self._job["requested"].items()
+        )
+        job["remaining_count"] = max(0, job["count"] - job["detected_count"])
+        if len(self._job["requested"]) == 1:
+            class_name = next(iter(self._job["requested"]))
+            model_class = next(
+                (
+                    model_name
+                    for model_name, label in MODEL_CLASS_LABELS.items()
+                    if label == class_name
+                ),
+                None,
+            )
+            job["yolo_class"] = model_class
+            if job["item_id"] is None and model_class is not None:
+                job["item_id"] = next(
+                    (
+                        item_id
+                        for item_id, mapped_class in ITEM_TO_YOLO_CLASS.items()
+                        if mapped_class == model_class
+                    ),
+                    None,
+                )
         if self._deadline is not None:
             job["remaining_seconds"] = max(
                 0, round(self._deadline - time.monotonic(), 1)
             )
         return job
 
-    def _publish(self, payload: dict[str, Any] | None) -> None:
-        if payload is None:
+    def _publish_job_state(
+        self, job: dict[str, Any] | None, event_type: str
+    ) -> None:
+        if job is None:
             return
+        event_status = (
+            "processing"
+            if job["status"] in ("waiting_camera", "in_progress")
+            else job["status"]
+        )
+        self._publish_event(
+            {
+                "type": event_type,
+                "job_id": job["job_id"],
+                "item_id": job.get("item_id"),
+                "yolo_class": job.get("yolo_class"),
+                "count": job["count"],
+                "detected_count": job["detected_count"],
+                "remaining_count": job["remaining_count"],
+                "source": job.get("source", "mqtt"),
+                "status": event_status,
+                "message": job["message"],
+            }
+        )
+        self._publish_status(
+            {
+                "state": (
+                    "busy"
+                    if job["status"] in ("waiting_camera", "in_progress")
+                    else "ready"
+                ),
+                "current_item": job.get("item_id"),
+                "remaining_count": job["remaining_count"],
+                "job_id": job["job_id"],
+            }
+        )
+
+    def _publish_event(self, payload: dict[str, Any]) -> None:
         client = self._client
         if client is None:
-            LOGGER.error("Cannot publish MQTT receiving result: client is not started")
+            LOGGER.error("Cannot publish MQTT event: client is not started")
             return
         result = client.publish(
-            MQTT_RESULT_TOPIC,
+            MQTT_EVENT_TOPIC,
             json.dumps(payload, ensure_ascii=False),
             qos=1,
         )
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
-            LOGGER.error("Could not publish MQTT receiving result: code %s", result.rc)
+            LOGGER.error("Could not publish MQTT event: code %s", result.rc)
+
+    def _publish_status(self, payload: dict[str, Any]) -> None:
+        client = self._client
+        if client is None:
+            LOGGER.error("Cannot publish MQTT status: client is not started")
+            return
+        result = client.publish(
+            MQTT_STATUS_TOPIC,
+            json.dumps(payload, ensure_ascii=False),
+            qos=1,
+            retain=True,
+        )
+        if result.rc != mqtt.MQTT_ERR_SUCCESS:
+            LOGGER.error("Could not publish MQTT status: code %s", result.rc)
 
 
 class CameraService:

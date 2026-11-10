@@ -51,30 +51,32 @@ const char API_KEY[] = "ค่าเดียวกับ ARDUINO_API_KEY";
 ## รับรายการอุปกรณ์ผ่าน MQTT
 
 Dashboard เชื่อมต่อ broker `mqtt.panplay-itgoeasy.xyz:1883` โดย subscribe topic
-`iot/receiving/request` และ publish สถานะไปที่ `iot/receiving/result` ใช้ค่าเริ่มต้น
-เหล่านี้ได้เลย หรือกำหนด `MQTT_HOST`, `MQTT_PORT`, `MQTT_REQUEST_TOPIC`,
-`MQTT_RESULT_TOPIC` และ `MQTT_RECEIVE_TIMEOUT_SECONDS` ผ่าน environment variables
+`armbot/cmd/queue`, publish event ไปที่ `armbot/event` และ publish retained status
+ไปที่ `armbot/status` สามารถกำหนด `MQTT_HOST`, `MQTT_PORT`, `MQTT_QUEUE_TOPIC`,
+`MQTT_EVENT_TOPIC`, `MQTT_STATUS_TOPIC` และ `MQTT_RECEIVE_TIMEOUT_SECONDS`
+ผ่าน environment variables
 
 ตัวอย่างส่งคำขอ:
 
 ```json
 {
-  "job_id": "receive-0001",
-  "items": [
-    { "class": "ultrasonic_hc-sr04", "quantity": 2 }
-  ]
+  "item_id": "ultrasonic",
+  "count": 2,
+  "source": "armbot"
 }
 ```
 
-ค่าคลาสที่รองรับคือ `bananapi`, `relay_module` และ `ultrasonic_hc-sr04`
-จำนวนต่อรายการต้องอยู่ระหว่าง 1 ถึง 100 งานหนึ่งจะตรวจพบสถานะ `completed`
-และข้อความ `รับของเรียบร้อย` เมื่อพบครบตามรายการ; หากครบ 120 วินาทียังไม่ครบ
-จะส่งสถานะ `incomplete` พร้อมจำนวนที่ตรวจพบ งานที่กำลังทำอยู่จะปฏิเสธคำขอใหม่
+รับ `item_id` หรือ `text` โดยรองรับ `relay`, `ultrasonic` และ `bananapi`;
+จำนวนรับได้จาก `count` หรือ `quantity` (ค่าเริ่มต้น 1, สูงสุด 100) และ `source`
+เป็น optional ระบบสร้าง `job_id` ให้หากไม่ส่งมา เมื่อรับคิวจะส่ง event `queued`
+และ status `busy`; ระหว่างตรวจจับจะอัปเดตจำนวนคงเหลือ และเมื่อครบจะส่ง event
+`completed` พร้อม status `ready` หากครบ 120 วินาทียังไม่ครบจะส่ง `incomplete`
+พร้อมจำนวนที่ตรวจพบ งานที่กำลังทำอยู่จะปฏิเสธคำขอใหม่
 
 การตรวจจับใช้กล้องของเบราว์เซอร์: เปิดหน้า Dashboard ค้างไว้ อนุญาตการใช้กล้อง
 และเลือกกล้องให้พร้อมก่อนส่งคำขอ MQTT ระบบเก็บจำนวนสูงสุดที่เห็นพร้อมกันในแต่ละ
 คลาสระหว่างงาน จึงไม่บวกวัตถุชิ้นเดิมซ้ำจากทุกเฟรม และไม่บันทึก event ซ้ำระหว่าง
-การตรวจนับ
+การตรวจนับ รูปแบบคำขอ `job_id`/`items` แบบเดิมยังรองรับอยู่ด้วย
 
 กำหนด `MQTT_USERNAME` และ `MQTT_PASSWORD` เป็น environment variables ในเครื่อง
 หรือเป็น GitHub Actions secrets ชื่อเดียวกันสำหรับ deploy; ไม่ใส่ credential
