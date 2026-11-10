@@ -108,11 +108,13 @@ jobs:
           DOMAIN: ${{ secrets.DOMAIN }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           ARDUINO_API_KEY: ${{ secrets.ARDUINO_API_KEY }}
+          MQTT_USERNAME: ${{ secrets.MQTT_USERNAME }}
+          MQTT_PASSWORD: ${{ secrets.MQTT_PASSWORD }}
         run: |
           set -euo pipefail
           umask 077
-          printf 'POSTGRES_DB=iot_dashboard\nPOSTGRES_USER=iot_user\nPOSTGRES_PASSWORD=%s\nARDUINO_API_KEY=%s\nDOMAIN=%s\n' \
-            "$POSTGRES_PASSWORD" "$ARDUINO_API_KEY" "$DOMAIN" > runtime.env
+          printf 'POSTGRES_DB=iot_dashboard\nPOSTGRES_USER=iot_user\nPOSTGRES_PASSWORD=%s\nARDUINO_API_KEY=%s\nDOMAIN=%s\nMQTT_USERNAME=%s\nMQTT_PASSWORD=%s\n' \
+            "$POSTGRES_PASSWORD" "$ARDUINO_API_KEY" "$DOMAIN" "$MQTT_USERNAME" "$MQTT_PASSWORD" > runtime.env
           scp runtime.env "${AWS_USER}@${AWS_HOST}:/tmp/iot-ai-runtime-${GITHUB_SHA}.env"
           rm -f runtime.env
 

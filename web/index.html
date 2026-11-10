@@ -183,6 +183,9 @@
             <div class="metric-value" id="count-ultrasonic">0</div>
           </article>
         </div>
+        <div class="notice" id="receiving-status" aria-live="polite">
+          MQTT: กำลังเชื่อมต่อ
+        </div>
       </section>
 
       <aside class="side">
@@ -270,6 +273,9 @@
     let lastCaptureRequestId = null;
     let captureRetryAt = 0;
     let captureClosing = false;
+    let receivingCameraStartInFlight = false;
+    let receivingCameraStopInFlight = false;
+    let receivingRetryAt = 0;
     let errorTimer;
 
     async function request(path, options = {}) {
@@ -305,7 +311,11 @@
       cameraRunning = camera.running;
       cameraTestMode = cameraRunning && camera.record_events === false;
       byId("camera-button").textContent = cameraRunning
-        ? (cameraTestMode ? "หยุดทดสอบ" : "หยุดกล้อง")
+        ? (camera.receiving_job_id
+          ? "หยุดรับรายการ"
+          : cameraTestMode
+            ? "หยุดทดสอบ"
+            : "หยุดกล้อง")
         : "ทดสอบกล้อง";
       byId("camera-button").className = cameraRunning ? "danger" : "";
       byId("camera-button").disabled = false;
@@ -316,18 +326,17 @@
         byId("video-frame").classList.remove("has-result");
       }
       byId("camera-caption").textContent = cameraRunning
-<<<<<<< HEAD
-        ? `กล้องเบราว์เซอร์ · ตรวจจับ ${camera.total} วัตถุ`
+        ? (camera.receiving_job_id
+          ? `MQTT รับรายการ · ตรวจจับ ${camera.total} วัตถุ`
+          : cameraTestMode
+            ? `โหมดทดสอบ · ไม่บันทึกประวัติ · ตรวจจับ ${camera.total} วัตถุ`
+            : `กล้องเบราว์เซอร์ · ตรวจจับ ${camera.total} วัตถุ`)
         : "โมเดล AI · รอเปิดกล้อง";
-=======
-        ? (cameraTestMode
-          ? `โหมดทดสอบ · ไม่บันทึกประวัติ · ตรวจจับ ${camera.total} วัตถุ`
-          : `กล้องเบราว์เซอร์ · ตรวจจับ ${camera.total} วัตถุ`)
-        : "YOLO11n · รอเปิดกล้อง";
->>>>>>> bf1cea9a9418fa56a74c75e0e3a1e703c3263d65
       byId("video-message").textContent = camera.error
         || (camera.capture_completed
           ? "บันทึกประวัติแล้ว กำลังปิดกล้อง"
+          : camera.receiving_job_id
+            ? "กำลังส่งภาพให้ AI ตรวจนับรายการจาก MQTT"
           : cameraTestMode
             ? "กำลังทดสอบกล้อง ภาพจะไม่ถูกบันทึกลงประวัติ"
             : "เมื่อ IR ตรวจพบอุปกรณ์ ระบบจะเปิดกล้องและบันทึกให้อัตโนมัติ");
@@ -363,7 +372,7 @@
       byId("last-seen").textContent = arduino.last_seen
         ? new Date(arduino.last_seen * 1000).toLocaleTimeString("th-TH")
         : "ยังไม่มี";
-      if (arduino.capture_pending) {
+      if (arduino.capture_pending && !cameraRunning) {
         byId("camera-caption").textContent = "IR ตรวจพบอุปกรณ์ · กำลังเตรียมกล้อง";
       }
       if (arduino.error) showError(arduino.error);
@@ -372,10 +381,31 @@
     function renderStatus(data) {
       renderCamera(data.camera);
       renderArduino(data.arduino);
-      maybeStartTriggeredCapture(data.arduino);
-      const online = data.camera.running || data.arduino.connected;
+      renderReceiving(data.receiving);
+      maybeStopReceivingCamera(data.camera, data.receiving);
+      maybeStartReceivingCapture(data.receiving);
+      maybeStartTriggeredCapture(data.arduino, data.receiving);
+      const online = data.camera.running || data.arduino.connected
+        || data.receiving?.connected;
       byId("system-status").textContent = online ? "ระบบออนไลน์" : "ระบบพร้อมใช้งาน";
       byId("system-status").classList.toggle("online", online);
+    }
+
+    function renderReceiving(receiving) {
+      const box = byId("receiving-status");
+      if (!receiving?.connected) {
+        box.textContent = `MQTT: ยังไม่เชื่อมต่อ${receiving?.error ? ` · ${receiving.error}` : ""}`;
+        return;
+      }
+      const job = receiving.job;
+      if (!job) {
+        box.textContent = "MQTT: เชื่อมต่อแล้ว · รอรายการรับอุปกรณ์";
+        return;
+      }
+      const progress = Object.entries(job.progress || {})
+        .map(([name, count]) => `${name} ${count.detected}/${count.requested}`)
+        .join(" · ");
+      box.textContent = `MQTT ${job.job_id}: ${progress} · ${job.message}`;
     }
 
     async function refreshStatus() {
@@ -384,6 +414,44 @@
       } catch (error) {
         byId("system-status").textContent = "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้";
         showError(error.message);
+      }
+    }
+
+    async function maybeStartReceivingCapture(receiving) {
+      const job = receiving?.job;
+      if (!job || job.status !== "waiting_camera") {
+        return;
+      }
+      if (receivingCameraStartInFlight || Date.now() < receivingRetryAt) return;
+      if (cameraRunning && !cameraTestMode) return;
+      receivingCameraStartInFlight = true;
+      try {
+        if (cameraRunning) await stopBrowserCamera();
+        await startBrowserCamera(null, false, job.job_id);
+      } catch (error) {
+        receivingRetryAt = Date.now() + 5000;
+        showError(`เปิดกล้องสำหรับ MQTT ไม่ได้: ${error.message}`);
+      } finally {
+        receivingCameraStartInFlight = false;
+      }
+    }
+
+    async function maybeStopReceivingCamera(camera, receiving) {
+      const job = receiving?.job;
+      if (
+        receivingCameraStopInFlight
+        || !camera.receiving_job_id
+        || !job
+        || job.job_id !== camera.receiving_job_id
+        || !["completed", "incomplete"].includes(job.status)
+      ) return;
+      receivingCameraStopInFlight = true;
+      try {
+        if (cameraRunning) await stopBrowserCamera();
+      } catch (error) {
+        showError(`ปิดกล้องหลังจบรายการไม่ได้: ${error.message}`);
+      } finally {
+        receivingCameraStopInFlight = false;
       }
     }
 
@@ -458,7 +526,11 @@
       }
     }
 
-    async function startBrowserCamera(triggerId = null, recordEvents = false) {
+    async function startBrowserCamera(
+      triggerId = null,
+      recordEvents = false,
+      receiveJobId = null
+    ) {
       const deviceId = byId("camera-select").value || selectedCameraId;
       const cameraState = await request("/api/camera/start", {
         method: "POST",
@@ -467,7 +539,8 @@
           iou: Number(byId("iou").value),
           mode: "browser",
           trigger_id: triggerId,
-          record_events: recordEvents
+          record_events: recordEvents,
+          receive_job_id: receiveJobId
         })
       });
       renderCamera(cameraState);
@@ -520,7 +593,8 @@
       }
     }
 
-    async function maybeStartTriggeredCapture(arduino) {
+    async function maybeStartTriggeredCapture(arduino, receiving) {
+      if (["waiting_camera", "in_progress"].includes(receiving?.job?.status)) return;
       const requestId = arduino.capture_request_id;
       if (!arduino.capture_pending || !requestId || requestId === lastCaptureRequestId) return;
       if (captureRequestInFlight || Date.now() < captureRetryAt) return;
