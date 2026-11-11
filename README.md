@@ -84,6 +84,11 @@ event `completed` พร้อม status `ready` หากครบ 120 วิ�
 จึงไม่บวกวัตถุชิ้นเดิมซ้ำจากทุกเฟรม และแสดงรายการจาก `armbot/items` แยกไว้ให้ดูว่า
 มีอุปกรณ์ใดจาก ARMbot ที่พร้อมตรวจสอบ รูปแบบคำขอ `job_id`/`items` แบบเดิมยังรองรับอยู่ด้วย
 
+ปุ่ม `ตรวจสอบ MQTT` ในหน้า Dashboard จะ subscribe ซ้ำแบบไม่ส่งคำสั่งหยิบไปยัง
+`armbot/cmd/queue` และ `armbot/items` เป็นเวลาไม่กี่วินาที แล้วแสดงผลว่าแต่ละ topic
+subscribe สำเร็จหรือไม่ พร้อม payload ที่ได้รับ ถ้าไม่มีข้อความใหม่ในช่วงทดสอบจะแสดง
+เป็น `ยังไม่มีข้อความใหม่` โดยเฉพาะคิวหยิบซึ่งไม่ได้เป็น retained message
+
 กำหนด `MQTT_USERNAME` และ `MQTT_PASSWORD` เป็น environment variables ในเครื่อง
 หรือเป็น GitHub Actions secrets ชื่อเดียวกันสำหรับ deploy; ไม่ใส่ credential
 ลงใน source code โดยค่าเริ่มต้นใช้ WebSocket + TLS ที่พอร์ต 8884 และ path `/mqtt`

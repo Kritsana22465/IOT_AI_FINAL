@@ -367,6 +367,9 @@ class MqttReceivingService:
         self._job: dict[str, Any] | None = None
         self._items: list[dict[str, Any]] = []
         self._items_updated_at: float | None = None
+        self._last_messages: dict[str, dict[str, Any]] = {}
+        self._test_event: threading.Event | None = None
+        self._test_topics_seen: set[str] = set()
         self._deadline: float | None = None
         self._mqtt_connected = False
         self._mqtt_error: str | None = None
@@ -442,6 +445,81 @@ class MqttReceivingService:
                 "items": [dict(item) for item in self._items],
                 "items_updated_at": self._items_updated_at,
             }
+
+    def test_subscriptions(self, timeout_seconds: float = 4.0) -> dict[str, Any]:
+        client = self._client
+        topics = (MQTT_QUEUE_TOPIC, MQTT_ITEMS_TOPIC)
+        if client is None or not self._mqtt_connected:
+            return {
+                "connected": False,
+                "subscribed": False,
+                "topics": [
+                    {
+                        "topic": topic,
+                        "subscribed": False,
+                        "message_received": False,
+                        "payload": None,
+                    }
+                    for topic in topics
+                ],
+                "message": "MQTT ยังไม่เชื่อมต่อ",
+            }
+
+        started_at = time.time()
+        test_event = threading.Event()
+        with self._lock:
+            self._test_event = test_event
+            self._test_topics_seen = set()
+        try:
+            result, _ = client.subscribe([(topic, 1) for topic in topics])
+            if result != mqtt.MQTT_ERR_SUCCESS:
+                return {
+                    "connected": True,
+                    "subscribed": False,
+                    "topics": [
+                        {
+                            "topic": topic,
+                            "subscribed": False,
+                            "message_received": False,
+                            "payload": None,
+                        }
+                        for topic in topics
+                    ],
+                    "message": f"MQTT subscribe ไม่สำเร็จ: code {result}",
+                }
+            test_event.wait(timeout_seconds)
+            with self._lock:
+                topic_results = []
+                for topic in topics:
+                    last = self._last_messages.get(topic)
+                    received_during_test = bool(
+                        last is not None and last["received_at"] >= started_at
+                    )
+                    topic_results.append(
+                        {
+                            "topic": topic,
+                            "subscribed": True,
+                            "message_received": received_during_test,
+                            "received_at": last["received_at"] if last else None,
+                            "payload": last["payload"] if last else None,
+                            "note": (
+                                None
+                                if received_during_test
+                                else "ยังไม่มีข้อความใหม่ในช่วงทดสอบ"
+                            ),
+                        }
+                    )
+            return {
+                "connected": True,
+                "subscribed": True,
+                "waited_seconds": timeout_seconds,
+                "topics": topic_results,
+                "message": "subscribe สำเร็จ",
+            }
+        finally:
+            with self._lock:
+                self._test_event = None
+                self._test_topics_seen = set()
 
     def attach_camera(self, job_id: str) -> None:
         with self._lock:
@@ -554,6 +632,20 @@ class MqttReceivingService:
             payload = json.loads(message.payload.decode("utf-8"))
             if not isinstance(payload, dict):
                 raise TypeError("MQTT payload must be a JSON object")
+
+            if message.topic in (MQTT_QUEUE_TOPIC, MQTT_ITEMS_TOPIC):
+                with self._lock:
+                    self._last_messages[message.topic] = {
+                        "received_at": time.time(),
+                        "payload": payload,
+                    }
+                    if self._test_event is not None:
+                        self._test_topics_seen.add(message.topic)
+                        if self._test_topics_seen == {
+                            MQTT_QUEUE_TOPIC,
+                            MQTT_ITEMS_TOPIC,
+                        }:
+                            self._test_event.set()
 
             if message.topic == MQTT_ITEMS_TOPIC:
                 self._update_item_catalog(payload)
@@ -1365,6 +1457,11 @@ def status() -> dict[str, Any]:
         "arduino": arduino.state(),
         "receiving": receiving.state(),
     }
+
+
+@app.post("/api/mqtt/test")
+def test_mqtt_subscriptions() -> dict[str, Any]:
+    return receiving.test_subscriptions()
 
 
 @app.post("/api/camera/start")
