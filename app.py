@@ -50,8 +50,11 @@ if not DATABASE_URL:
 CLASS_NAMES = ("Banana Pi", "Relay module", "Ultrasonic HC-SR04")
 MODEL_CLASS_LABELS = {
     "bananapi": "Banana Pi",
+    "banana pi": "Banana Pi",
     "relay_module": "Relay module",
+    "relay module": "Relay module",
     "ultrasonic_hc-sr04": "Ultrasonic HC-SR04",
+    "ultrasonic hc-sr04": "Ultrasonic HC-SR04",
 }
 ITEM_TO_YOLO_CLASS = {
     "relay": "relay_module",
@@ -977,7 +980,7 @@ class CameraService:
         counts = {name: 0 for name in CLASS_NAMES}
         if result.boxes is not None:
             for class_id in result.boxes.cls.int().tolist():
-                model_name = result.names[class_id]
+                model_name = result.names[class_id].casefold()
                 name = MODEL_CLASS_LABELS.get(model_name)
                 if name in counts:
                     counts[name] += 1
