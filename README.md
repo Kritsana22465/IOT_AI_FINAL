@@ -50,10 +50,10 @@ const char API_KEY[] = "ค่าเดียวกับ ARDUINO_API_KEY";
 
 ## รับรายการอุปกรณ์ผ่าน MQTT
 
-Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ่าน WebSocket + TLS โดยใช้ prefix `armbot` และ subscribe topic
-`armbot/cmd/queue` เพื่อรับคิวหยิบ และ `armbot/items` เพื่อดึงรายการอุปกรณ์จาก ARMbot
+Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ่าน WebSocket + TLS โดยใช้ prefix `armbot-010eb21b` และ subscribe topic
+`armbot-010eb21b/cmd/queue` เพื่อรับคิวหยิบ และ `armbot-010eb21b/items` เพื่อดึงรายการอุปกรณ์จาก ARMbot
 มาแสดงในหน้า Dashboard (รายการนี้เป็น retained message) จากนั้น publish event ไปที่
-`armbot/event` และ publish retained status ไปที่ `armbot/status` สามารถกำหนด
+`armbot-010eb21b/event` และ publish retained status ไปที่ `armbot-010eb21b/status` สามารถกำหนด
 `MQTT_HOST`, `MQTT_PORT`, `MQTT_QUEUE_TOPIC`, `MQTT_ITEMS_TOPIC`, `MQTT_EVENT_TOPIC`,
 `MQTT_STATUS_TOPIC` และ `MQTT_RECEIVE_TIMEOUT_SECONDS`
 ผ่าน environment variables
@@ -74,18 +74,19 @@ Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ�
 และ status `busy`; หลังรับคิวระบบจะอยู่สถานะ `waiting_ir` และยังไม่เปิดกล้อง
 จนกว่า Arduino จะส่ง `object_present: true` เมื่อ IR ตรวจพบของ ระบบจะเปิดกล้อง
 ของ Dashboard นี้เพื่อตรวจนับตามรายการในคิว อัปเดตจำนวนคงเหลือ และเมื่อครบจะส่ง
-event `completed` พร้อม status `ready` หากครบ 120 วินาทียังไม่ครบจะส่ง
-`incomplete` พร้อมจำนวนที่ตรวจพบ งานที่กำลังทำอยู่จะปฏิเสธคำขอใหม่
+event `completed` พร้อม status `ready` หากภายใน 120 วินาทียังไม่มี IR ตรวจพบ
+อุปกรณ์จะส่ง `incomplete`; เมื่อ IR active แล้วจะยกเลิก timeout และเปิดกล้องค้างไว้
+จนกว่าจะตรวจพบรายการครบ งานที่กำลังทำอยู่จะปฏิเสธคำขอใหม่
 
 ลำดับการทำงานคือ เพื่อนกดหยิบ → ARMbot วางอุปกรณ์ → IR ตรวจพบ → Dashboard นี้
 เปิดกล้องและตรวจสอบรายการ → แสดงผลว่าครบ/ไม่ครบ → บันทึกรูปผลตรวจและปิดกล้อง
 โดยไม่ต้องแก้ Dashboard ของเพื่อน เปิดหน้า Dashboard ค้างไว้ อนุญาตการใช้กล้อง
 และเลือกกล้องให้พร้อม ระบบเก็บจำนวนสูงสุดที่เห็นพร้อมกันในแต่ละคลาสระหว่างงาน
-จึงไม่บวกวัตถุชิ้นเดิมซ้ำจากทุกเฟรม และแสดงรายการจาก `armbot/items` แยกไว้ให้ดูว่า
+จึงไม่บวกวัตถุชิ้นเดิมซ้ำจากทุกเฟรม และแสดงรายการจาก `armbot-010eb21b/items` แยกไว้ให้ดูว่า
 มีอุปกรณ์ใดจาก ARMbot ที่พร้อมตรวจสอบ รูปแบบคำขอ `job_id`/`items` แบบเดิมยังรองรับอยู่ด้วย
 
 ปุ่ม `ตรวจสอบ MQTT` ในหน้า Dashboard จะ subscribe ซ้ำแบบไม่ส่งคำสั่งหยิบไปยัง
-`armbot/cmd/queue` และ `armbot/items` เป็นเวลาไม่กี่วินาที แล้วแสดงผลว่าแต่ละ topic
+`armbot-010eb21b/cmd/queue` และ `armbot-010eb21b/items` เป็นเวลาไม่กี่วินาที แล้วแสดงผลว่าแต่ละ topic
 subscribe สำเร็จหรือไม่ พร้อม payload ที่ได้รับ ถ้าไม่มีข้อความใหม่ในช่วงทดสอบจะแสดง
 เป็น `ยังไม่มีข้อความใหม่` โดยเฉพาะคิวหยิบซึ่งไม่ได้เป็น retained message
 

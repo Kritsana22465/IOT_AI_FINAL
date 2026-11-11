@@ -75,10 +75,10 @@ MQTT_TLS = os.getenv(
 MQTT_WS_PATH = os.getenv("MQTT_WS_PATH", "/mqtt").strip()
 MQTT_USERNAME = os.getenv("MQTT_USERNAME", "").strip()
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
-MQTT_QUEUE_TOPIC = os.getenv("MQTT_QUEUE_TOPIC", "armbot/cmd/queue").strip()
-MQTT_ITEMS_TOPIC = os.getenv("MQTT_ITEMS_TOPIC", "armbot/items").strip()
-MQTT_EVENT_TOPIC = os.getenv("MQTT_EVENT_TOPIC", "armbot/event").strip()
-MQTT_STATUS_TOPIC = os.getenv("MQTT_STATUS_TOPIC", "armbot/status").strip()
+MQTT_QUEUE_TOPIC = os.getenv("MQTT_QUEUE_TOPIC", "armbot-010eb21b/cmd/queue").strip()
+MQTT_ITEMS_TOPIC = os.getenv("MQTT_ITEMS_TOPIC", "armbot-010eb21b/items").strip()
+MQTT_EVENT_TOPIC = os.getenv("MQTT_EVENT_TOPIC", "armbot-010eb21b/event").strip()
+MQTT_STATUS_TOPIC = os.getenv("MQTT_STATUS_TOPIC", "armbot-010eb21b/status").strip()
 MQTT_RECEIVE_TIMEOUT_SECONDS = float(
     os.getenv("MQTT_RECEIVE_TIMEOUT_SECONDS", "120")
 )
@@ -534,7 +534,11 @@ class MqttReceivingService:
             ):
                 raise ValueError("MQTT receiving request is not waiting for IR")
             job["status"] = "in_progress"
-            job["message"] = "IR ตรวจพบอุปกรณ์ · กำลังตรวจนับอุปกรณ์"
+            job["message"] = "IR ตรวจพบอุปกรณ์ · เปิดกล้องรอของให้ครบ"
+            self._deadline = None
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
             job_state = self._job_snapshot_locked()
         self._publish_job_state(job_state, "processing")
 
@@ -570,12 +574,34 @@ class MqttReceivingService:
                 )
                 event_type = "incomplete"
             elif changed:
-                job["message"] = "กำลังตรวจนับอุปกรณ์"
+                detected_count = sum(
+                    min(job["detected"][name], quantity)
+                    for name, quantity in job["requested"].items()
+                )
+                requested_count = sum(job["requested"].values())
+                job["message"] = (
+                    f"ตรวจพบ {detected_count}/{requested_count} รายการ "
+                    "· เปิดกล้องรอของที่เหลือ"
+                )
                 job_state = self._job_snapshot_locked()
 
         if job_state is not None:
             self._publish_job_state(job_state, event_type)
         return job_state
+
+    def abort_camera(self, job_id: str) -> None:
+        with self._lock:
+            job = self._job
+            if (
+                job is None
+                or job["job_id"] != job_id
+                or job["status"] != "in_progress"
+            ):
+                return
+            result = self._finish_locked(
+                "incomplete", "หยุดการตรวจสอบก่อนอุปกรณ์จะครบ"
+            )
+        self._publish_job_state(result, "incomplete")
 
     def _on_connect(
         self,
@@ -851,7 +877,7 @@ class MqttReceivingService:
             if (
                 self._job is None
                 or self._job["job_id"] != job_id
-                or self._job["status"] not in ("waiting_ir", "in_progress")
+                or self._job["status"] != "waiting_ir"
             ):
                 return
             result = self._finish_locked("incomplete", "หมดเวลา รับของไม่ครบ")
@@ -1118,12 +1144,15 @@ class CameraService:
             self._running = False
             worker = self._worker
             capture = self._capture
+            receiving_job_id = self._state["receiving_job_id"]
             self._worker = None
             self._capture = None
         if worker is not None and worker is not threading.current_thread():
             worker.join(timeout=2)
         if capture is not None:
             capture.release()
+        if receiving_job_id is not None:
+            self._receiving_service.abort_camera(receiving_job_id)
         with self._lock:
             self._reset_state(None)
             self._jpeg = placeholder_frame("Camera stopped")
