@@ -19,7 +19,11 @@ CLASSES = (
 AUGMENTATION_SUFFIX = re.compile(r"_aug_\d+$")
 
 
-def parse_label_file(label_path: Path) -> list[str]:
+def parse_label_file(
+    label_path: Path,
+    expected_class_id: int | None = None,
+    allow_empty: bool = False,
+) -> list[str]:
     normalized_rows = []
     for line_number, line in enumerate(
         label_path.read_text(encoding="utf-8").splitlines(), start=1
@@ -41,6 +45,11 @@ def parse_label_file(label_path: Path) -> list[str]:
         if not source_class.is_integer() or source_class < 0:
             raise ValueError(
                 f"{label_path}:{line_number}: class id must be a non-negative integer"
+            )
+        if expected_class_id is not None and source_class != expected_class_id:
+            raise ValueError(
+                f"{label_path}:{line_number}: expected source class "
+                f"{expected_class_id}, got {int(source_class)}"
             )
         if not (
             0 <= center_x <= 1
@@ -67,7 +76,7 @@ def parse_label_file(label_path: Path) -> list[str]:
             f"{{class_id}} {center_x:.6f} {center_y:.6f} {width:.6f} {height:.6f}"
         )
 
-    if not normalized_rows:
+    if not normalized_rows and not allow_empty:
         raise ValueError(f"{label_path}: label file has no object annotations")
     return normalized_rows
 
@@ -82,6 +91,55 @@ def prepare_dataset(source_root: Path, destination: Path) -> dict[str, int]:
 
     for class_id, (folder_name, _) in enumerate(CLASSES):
         class_root = source_root / folder_name
+        if folder_name == "ultrasonic_hc-sr04":
+            for source_split, split in (("train", "train"), ("valid", "val")):
+                split_root = class_root / source_split
+                image_dir = split_root / "images"
+                label_dir = split_root / "labels"
+                if not image_dir.is_dir() or not label_dir.is_dir():
+                    raise FileNotFoundError(
+                        f"Expected images and labels folders under {split_root}"
+                    )
+                images = sorted(image_dir.glob("*.jpg"))
+                labels = {path.stem: path for path in label_dir.glob("*.txt")}
+                image_stems = {path.stem for path in images}
+                missing_labels = sorted(image_stems - labels.keys())
+                orphan_labels = sorted(labels.keys() - image_stems)
+                if missing_labels or orphan_labels:
+                    raise ValueError(
+                        f"{folder_name}/{source_split}: "
+                        f"missing labels={missing_labels}, "
+                        f"labels without images={orphan_labels}"
+                    )
+                if not images:
+                    raise ValueError(
+                        f"{folder_name}/{source_split}: no .jpg images found"
+                    )
+
+                for image_path in images:
+                    rows = parse_label_file(
+                        labels[image_path.stem],
+                        expected_class_id=0,
+                        allow_empty=True,
+                    )
+                    target_stem = f"{folder_name}_{image_path.stem}"
+                    target_image = (
+                        destination / "images" / split / f"{target_stem}.jpg"
+                    )
+                    target_label = (
+                        destination / "labels" / split / f"{target_stem}.txt"
+                    )
+                    target_image.parent.mkdir(parents=True, exist_ok=True)
+                    target_label.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(image_path, target_image)
+                    target_label.write_text(
+                        "\n".join(row.format(class_id=class_id) for row in rows)
+                        + ("\n" if rows else ""),
+                        encoding="utf-8",
+                    )
+                    counts[split] += 1
+            continue
+
         image_dir = class_root / "images"
         label_dir = class_root / "labels"
         if not image_dir.is_dir() or not label_dir.is_dir():
@@ -116,11 +174,8 @@ def prepare_dataset(source_root: Path, destination: Path) -> dict[str, int]:
             group = AUGMENTATION_SUFFIX.sub("", image_path.stem)
             if group in validation_groups and image_path.stem != group:
                 continue
-            label_path = labels[image_path.stem]
-            rows = parse_label_file(label_path)
-            split = (
-                "val" if group in validation_groups else "train"
-            )
+            rows = parse_label_file(labels[image_path.stem])
+            split = "val" if group in validation_groups else "train"
             target_stem = f"{folder_name}_{image_path.stem}"
             target_image = destination / "images" / split / f"{target_stem}.jpg"
             target_label = destination / "labels" / split / f"{target_stem}.txt"
@@ -169,7 +224,7 @@ def main() -> None:
         counts = prepare_dataset(args.data.resolve(), prepared_data)
         print(
             f"Label check passed. Prepared {counts['train']} training images "
-            f"and {counts['val']} validation originals."
+            f"and {counts['val']} validation images."
         )
         print("Classes: " + ", ".join(name for _, name in CLASSES))
 

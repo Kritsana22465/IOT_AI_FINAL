@@ -122,12 +122,17 @@ event `completed` พร้อม status `ready` หากภายใน 120 �
 
 ```powershell
 py -m pip install -r requirements.txt
-py train.py
+py train.py --name iot-components-ultrasonic-v4
 ```
+
+การฝึกจะใช้ `train` และ `valid` split ตาม dataset ultrasonic เวอร์ชันใหม่
+โดยไม่ย้ายภาพจาก `test` มาใช้ฝึกหรือ validation; Banana Pi และ Relay module
+ยังแบ่งชุดตรวจสอบจากภาพต้นฉบับแยกกลุ่มกับภาพ augmentation
 
 แอปและ `detect.py` ใช้โมเดล `best.pt` ที่ root ของโปรเจกต์ โดยมีคลาส Banana Pi,
 Relay module และ Ultrasonic HC-SR04 หากฝึกโมเดลใหม่แล้วต้องการใช้ ให้คัดลอกไฟล์
-`runs/object-detection/iot-components/weights/best.pt` มาทับไฟล์นี้ก่อน build หรือ deploy
+`runs/object-detection/iot-components-ultrasonic-v4/weights/best.pt` มาทับไฟล์นี้
+หลังตรวจสอบผลการฝึกก่อน build หรือ deploy
 
 ## หยุดระบบ local
 
