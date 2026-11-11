@@ -139,6 +139,149 @@
       .metric-value { font-size: 29px; }
       .video-frame { min-height: 220px; }
     }
+
+    /* User-facing minimal layout */
+    :root {
+      color-scheme: light;
+      --background: #f5f7fb;
+      --panel: #ffffff;
+      --panel-light: #f8fafc;
+      --line: #e5eaf1;
+      --text: #172033;
+      --muted: #718096;
+      --cyan: #0f9fa5;
+      --green: #16845f;
+      --red: #c84d5c;
+      --amber: #b87916;
+    }
+    body {
+      background: var(--background);
+      color: var(--text);
+      font-size: 15px;
+    }
+    .shell { max-width: 1180px; padding: 34px 22px 48px; }
+    header { margin-bottom: 26px; }
+    .brand { gap: 12px; }
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: #dff5f3;
+      color: var(--cyan);
+      font-size: 19px;
+    }
+    h1 { font-size: 21px; letter-spacing: 0; }
+    .subtitle { margin-top: 2px; font-size: 13px; }
+    .status-pill { background: #fff; padding: 7px 12px; color: #627084; }
+    .layout { grid-template-columns: minmax(0, 1.45fr) minmax(310px, .82fr); gap: 20px; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 8px 26px rgba(31, 48, 75, .06);
+    }
+    .panel-head { padding: 17px 20px; border-bottom-color: var(--line); }
+    h2 { font-size: 15px; }
+    .tiny { color: var(--muted); font-size: 12px; }
+    .video-frame {
+      min-height: 350px;
+      background: #111827;
+    }
+    .video-empty { color: #b8c2d1; }
+    .camera-controls {
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      padding: 17px 20px 20px;
+    }
+    .camera-controls > div:first-child { min-width: 0; }
+    label { color: #64748b; }
+    input, select {
+      color: var(--text);
+      background: #fff;
+      border-color: #dce3ec;
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+    input:focus, select:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px #0f9fa51c; }
+    button {
+      border-radius: 10px;
+      padding: 10px 16px;
+      background: var(--cyan);
+      color: #fff;
+    }
+    button.secondary {
+      color: #395064;
+      background: #eef3f7;
+      border: 1px solid #dce4ec;
+    }
+    button.danger { background: #fff0f1; color: #b83d4b; border: 1px solid #f2cbd0; }
+    button:disabled { background: #e9eef3; color: #93a0ae; border-color: #e1e7ed; }
+    .camera-settings {
+      grid-column: 1 / -1;
+      margin-top: -2px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .camera-settings summary { cursor: pointer; width: fit-content; }
+    .camera-settings summary:hover { color: var(--cyan); }
+    .camera-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+    .queue-panel { margin-top: 16px; }
+    .queue-body { padding: 0 20px 18px; }
+    .manual-scan-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+    .manual-scan-row .notice { margin-top: 0; }
+    .manual-scan-button { margin-top: 0; min-width: 130px; }
+    .notice {
+      margin-top: 0;
+      padding: 11px 13px;
+      color: #536277;
+      background: #f8fafc;
+      border-color: var(--line);
+      border-radius: 10px;
+    }
+    .notice.receiving-completed { color: var(--green); background: #effaf5; border-color: #bde8d5; }
+    .notice.receiving-incomplete { color: var(--red); background: #fff3f4; border-color: #f0cbd0; }
+    .notice.receiving-in_progress { color: #087d83; background: #ecfbfb; border-color: #b9e8e8; }
+    .item-panel { margin-top: 16px; }
+    .item-list { padding: 12px 20px 18px; }
+    .item-row { background: #fbfcfe; border-color: var(--line); }
+    .item-row.active { border-color: #75cdd0; background: #effafa; }
+    .item-badge { color: #718096; }
+    .item-badge.active { color: #087d83; }
+    .item-badge.ready { color: var(--green); }
+    .side { gap: 16px; }
+    .sensor-body, .system-body { padding: 16px 18px 18px; }
+    .sensor-group { padding: 15px; background: #fbfcfe; border-color: var(--line); }
+    .sensor-group + .sensor-group { margin-top: 10px; }
+    .sensor-group-title { font-size: 14px; }
+    .sensor-group-description { color: var(--muted); }
+    .presence-state.on { color: var(--green); }
+    .presence-state.off, .presence-state.stale { color: var(--amber); }
+    .sensor-health.ready { color: var(--green); }
+    .sensor-health.unavailable { color: var(--amber); }
+    .connection-info { margin-top: 12px; padding: 10px 11px; border-color: var(--line); }
+    .connection-info strong { color: var(--cyan); }
+    .event-list { padding: 12px 18px 18px; max-height: 390px; }
+    .event-item { background: #fbfcfe; border-color: var(--line); }
+    .event-item:hover { border-color: #75cdd0; }
+    .event-delete { color: #c84d5c; }
+    .event-delete:hover { color: #b83d4b; background: #fff0f1; border-color: #f2cbd0; }
+    .modal { background: rgba(27, 39, 57, .62); }
+    .modal-card { background: #fff; border-color: var(--line); }
+    .modal-close { background: #eef3f7; color: #395064; }
+    .modal-card img { background: #f3f6f9; }
+    @media (max-width: 850px) {
+      .camera-controls { grid-template-columns: minmax(0, 1fr) auto; }
+    }
+    @media (max-width: 560px) {
+      .shell { padding: 22px 14px 36px; }
+      .camera-controls { grid-template-columns: 1fr; }
+      .camera-controls button { width: 100%; }
+      .camera-settings { grid-column: auto; }
+      .camera-settings-grid { grid-template-columns: 1fr; }
+      .manual-scan-row { grid-template-columns: 1fr; }
+      .manual-scan-button { width: 100%; }
+      .video-frame { min-height: 220px; }
+    }
   </style>
 </head>
 <body>
@@ -147,8 +290,8 @@
       <div class="brand">
         <div class="brand-mark">◉</div>
         <div>
-          <h1>IoT Vision Dashboard</h1>
-          <p class="subtitle">ตรวจจับวัตถุด้วย AI · เชื่อมต่อ Arduino UNO R4</p>
+          <h1>ระบบตรวจรับอุปกรณ์</h1>
+          <p class="subtitle">ตรวจรับอุปกรณ์ด้วยกล้องและเซนเซอร์</p>
         </div>
       </div>
       <div id="system-status" class="status-pill">กำลังตรวจสอบระบบ</div>
@@ -161,7 +304,7 @@
           <div class="panel-head">
             <div>
               <h2>กล้องตรวจจับวัตถุ</h2>
-              <p class="tiny" id="camera-caption">YOLO11n · รอเปิดกล้อง</p>
+              <p class="tiny" id="camera-caption">เลือกกล้อง แล้วเริ่มตรวจสอบ</p>
             </div>
             <span class="tiny" id="fps">-- FPS</span>
           </div>
@@ -170,45 +313,52 @@
             <img id="camera-stream" alt="ภาพจากกล้องพร้อมกรอบตรวจจับ">
             <div class="video-empty">
               <div class="camera-icon">▣</div>
-              <div id="video-message">เมื่อ IR ตรวจพบอุปกรณ์ ระบบจะเปิดกล้องและบันทึกให้อัตโนมัติ</div>
+              <div id="video-message">เมื่อมีคิวรับอุปกรณ์ ให้กด Manual Scan เพื่อเริ่มตรวจสอบ</div>
             </div>
           </div>
           <div class="camera-controls">
             <div>
-              <label for="camera-select">กล้องที่จะใช้</label>
+              <label for="camera-select">เลือกกล้อง</label>
               <select id="camera-select" aria-label="เลือกกล้องที่จะใช้">
                 <option value="">กำลังค้นหากล้อง...</option>
               </select>
             </div>
-            <div>
-              <label for="confidence">ความมั่นใจขั้นต่ำ</label>
-              <input id="confidence" type="number" min="0.1" max="1" step="0.05" value="0.5">
-            </div>
-            <div>
-              <label for="iou">กรองกรอบซ้ำ (IoU)</label>
-              <input id="iou" type="number" min="0.1" max="1" step="0.05" value="0.25">
-            </div>
-            <button id="camera-button" onclick="toggleCamera()">ทดสอบกล้อง</button>
+            <button id="camera-button" class="secondary" onclick="toggleCamera()">เปิดกล้องทดสอบ</button>
+            <details class="camera-settings">
+              <summary>ตั้งค่าการตรวจจับเพิ่มเติม</summary>
+              <div class="camera-settings-grid">
+                <div>
+                  <label for="confidence">ความมั่นใจขั้นต่ำ</label>
+                  <input id="confidence" type="number" min="0.1" max="1" step="0.05" value="0.5">
+                </div>
+                <div>
+                  <label for="iou">กรองกรอบซ้ำ (IoU)</label>
+                  <input id="iou" type="number" min="0.1" max="1" step="0.05" value="0.25">
+                </div>
+              </div>
+            </details>
           </div>
         </div>
-        <div class="manual-scan-row">
-          <div class="notice" id="receiving-status" aria-live="polite">
-            MQTT: กำลังเชื่อมต่อ
-          </div>
-          <button id="manual-scan-button" class="secondary manual-scan-button" onclick="manualScan()" disabled>
-            Manual Scan
-          </button>
-        </div>
-        <section class="panel item-panel">
+        <section class="panel queue-panel">
           <div class="panel-head">
             <div>
-              <h2>รายการอุปกรณ์จาก ARMbot</h2>
-              <p class="tiny">ข้อมูลจาก topic <code>armbot-010eb21b/items</code> สำหรับเทียบรายการที่ต้องตรวจ</p>
+              <h2>คิวรับอุปกรณ์ล่าสุด</h2>
+              <p class="tiny">รายการที่เพื่อนสั่งหยิบและรอการตรวจสอบ</p>
             </div>
             <span class="tiny" id="armbot-item-count">0 รายการ</span>
           </div>
-          <div id="armbot-item-list" class="item-list" aria-live="polite">
-            <div class="item-empty">กำลังรอรายการจาก ARMbot...</div>
+          <div class="queue-body">
+            <div class="manual-scan-row">
+              <div class="notice" id="receiving-status" aria-live="polite">
+                กำลังตรวจสอบคิวล่าสุด
+              </div>
+              <button id="manual-scan-button" class="manual-scan-button" onclick="manualScan()" disabled>
+                Manual Scan
+              </button>
+            </div>
+            <div id="armbot-item-list" class="item-list" aria-live="polite">
+              <div class="item-empty">กำลังรอรายการจาก ARMbot...</div>
+            </div>
           </div>
         </section>
       </section>
@@ -217,8 +367,8 @@
         <section class="panel">
           <div class="panel-head">
             <div>
-              <h2>Arduino UNO R4</h2>
-              <p class="tiny" id="arduino-caption">ยังไม่ได้เชื่อมต่อ</p>
+              <h2>เซนเซอร์แท่นวาง</h2>
+              <p class="tiny" id="arduino-caption">กำลังรอการเชื่อมต่อ</p>
             </div>
             <span class="tiny" id="arduino-dot">● ออฟไลน์</span>
           </div>
@@ -227,45 +377,39 @@
               <div class="sensor-group-head">
                 <div>
                   <div class="sensor-group-title">IR Sensor</div>
-                  <p class="sensor-group-description">ตรวจจับว่ามีอุปกรณ์วางบนแท่นหรือไม่</p>
+                  <p class="sensor-group-description">ตรวจจับอุปกรณ์ที่ถูกนำมาวาง</p>
                 </div>
                 <strong id="ir-ready" class="sensor-health unavailable">OFF</strong>
               </div>
               <div class="relay-row">
-                <span>ผลการตรวจจับ</span>
+                <span>สถานะอุปกรณ์</span>
                 <strong id="object-presence" class="presence-state" aria-live="polite">ยังไม่มีข้อมูล</strong>
               </div>
             </div>
 
-            <div class="connection-info"><span>ช่องทาง Arduino</span><strong>Wi-Fi</strong></div>
+            <div class="connection-info"><span>การเชื่อมต่อ</span><strong>Wi-Fi</strong></div>
           </div>
         </section>
 
         <section class="panel">
           <div class="panel-head">
             <div>
-              <h2>สถานะระบบ</h2>
-              <p class="tiny">อัปเดตอัตโนมัติ</p>
+              <h2>วิธีใช้งาน</h2>
+              <p class="tiny">ตรวจรับอุปกรณ์ใน 3 ขั้นตอน</p>
             </div>
           </div>
           <div class="system-body">
-            <div class="relay-row" style="border:0;padding-top:0"><span>AI Model</span><strong>YOLO11n</strong></div>
-            <div class="relay-row"><span>วัตถุในภาพ</span><strong id="total-count">0</strong></div>
-            <div class="relay-row"><span>เวลาที่รับข้อมูล Arduino</span><strong class="tiny" id="last-seen">ยังไม่มี</strong></div>
-            <div class="notice">
-              <strong>รูปแบบ Wi-Fi:</strong> Arduino ส่งข้อมูลมายัง Dashboard เช่น
-              <code>{"object_present":true}</code>
-              ค่า <code>object_present</code> ต้องเป็น <code>true</code> เมื่อมีของบนแท่น
-              และ <code>false</code> เมื่อแท่นว่าง
-            </div>
+            <div class="relay-row" style="border:0;padding-top:0"><span>1. ตรวจคิวล่าสุด</span><strong>รอรายการ</strong></div>
+            <div class="relay-row"><span>2. เปิดกล้อง</span><strong>กด Manual Scan</strong></div>
+            <div class="relay-row"><span>3. ตรวจครบแล้ว</span><strong>บันทึกรูปอัตโนมัติ</strong></div>
           </div>
         </section>
 
         <section class="panel">
           <div class="panel-head">
             <div>
-              <h2>ประวัติการวางอุปกรณ์</h2>
-              <p class="tiny">กดรายการเพื่อดูรูปและเวลาที่ตรวจพบ</p>
+              <h2>ประวัติการตรวจรับ</h2>
+              <p class="tiny">กดรายการเพื่อดูรูปและเวลา</p>
             </div>
             <span class="tiny" id="event-count">0 รายการ</span>
           </div>
@@ -340,8 +484,8 @@
           : cameraTestMode
             ? "หยุดทดสอบ"
             : "หยุดกล้อง")
-        : "ทดสอบกล้อง";
-      byId("camera-button").className = cameraRunning ? "danger" : "";
+        : "เปิดกล้องทดสอบ";
+      byId("camera-button").className = cameraRunning ? "danger" : "secondary";
       byId("camera-button").disabled = false;
       byId("camera-select").disabled = cameraRunning;
       byId("video-frame").classList.toggle("active", cameraRunning);
@@ -351,11 +495,11 @@
       }
       byId("camera-caption").textContent = cameraRunning
         ? (camera.receiving_job_id
-          ? `MQTT รับรายการ · ตรวจจับ ${camera.total} วัตถุ`
+          ? `กำลังตรวจสอบคิวล่าสุด · พบ ${camera.total} รายการ`
           : cameraTestMode
-            ? `โหมดทดสอบ · ไม่บันทึกประวัติ · ตรวจจับ ${camera.total} วัตถุ`
-            : `กล้องเบราว์เซอร์ · ตรวจจับ ${camera.total} วัตถุ`)
-        : "โมเดล AI · รอเปิดกล้อง";
+            ? `โหมดทดสอบ · ไม่บันทึกประวัติ · พบ ${camera.total} รายการ`
+            : `กำลังตรวจสอบ · พบ ${camera.total} รายการ`)
+        : "เลือกกล้อง แล้วเริ่มตรวจสอบ";
       byId("video-message").textContent = camera.error
         || (camera.capture_completed
           ? "บันทึกประวัติแล้ว กำลังปิดกล้อง"
@@ -365,7 +509,8 @@
             ? "กำลังทดสอบกล้อง ภาพจะไม่ถูกบันทึกลงประวัติ"
             : "เมื่อ IR ตรวจพบอุปกรณ์ ระบบจะเปิดกล้องและบันทึกให้อัตโนมัติ");
       byId("fps").textContent = cameraRunning ? `${camera.fps} FPS` : "-- FPS";
-      byId("total-count").textContent = camera.total || 0;
+      const totalCount = byId("total-count");
+      if (totalCount) totalCount.textContent = camera.total || 0;
       if (camera.error) showError(camera.error);
     }
 
@@ -389,9 +534,12 @@
         presence.textContent = arduino.object_present ? "มีอุปกรณ์มาวางแล้ว" : "ยังไม่มีอุปกรณ์";
         presence.className = `presence-state ${arduino.object_present ? "on" : "off"}`;
       }
-      byId("last-seen").textContent = arduino.last_seen
-        ? new Date(arduino.last_seen * 1000).toLocaleTimeString("th-TH")
-        : "ยังไม่มี";
+      const lastSeen = byId("last-seen");
+      if (lastSeen) {
+        lastSeen.textContent = arduino.last_seen
+          ? new Date(arduino.last_seen * 1000).toLocaleTimeString("th-TH")
+          : "ยังไม่มี";
+      }
       if (arduino.capture_pending && !cameraRunning) {
         byId("camera-caption").textContent = "IR ตรวจพบอุปกรณ์ · กำลังเตรียมกล้อง";
       }
@@ -416,12 +564,12 @@
       const box = byId("receiving-status");
       box.className = "notice";
       if (!receiving?.connected) {
-        box.textContent = `MQTT: ยังไม่เชื่อมต่อ${receiving?.error ? ` · ${receiving.error}` : ""}`;
+        box.textContent = `ยังเชื่อมต่อระบบคิวไม่ได้${receiving?.error ? ` · ${receiving.error}` : ""}`;
         return;
       }
       const job = receiving.job;
       if (!job) {
-        box.textContent = "MQTT: เชื่อมต่อแล้ว · รอรายการรับอุปกรณ์";
+        box.textContent = "ยังไม่มีคิวรับอุปกรณ์ล่าสุด";
         return;
       }
       const progress = Object.entries(job.progress || {})
@@ -434,7 +582,7 @@
         incomplete: "อุปกรณ์ไม่ครบ"
       }[job.status] || job.status;
       box.classList.add(`receiving-${job.status}`);
-      box.textContent = `สถานะรับอุปกรณ์: ${statusLabel} · ${progress} · ${job.message}`;
+      box.textContent = `${statusLabel} · ${progress} · ${job.message}`;
     }
 
     function renderArmBotItems(receiving) {
@@ -444,11 +592,11 @@
       byId("armbot-item-count").textContent = `${items.length} รายการ`;
       list.replaceChildren();
       if (!receiving?.connected) {
-        list.innerHTML = '<div class="item-empty">ยังไม่ได้เชื่อมต่อ MQTT</div>';
+        list.innerHTML = '<div class="item-empty">ยังเชื่อมต่อรายการจาก ARMbot ไม่สำเร็จ</div>';
         return;
       }
       if (!items.length) {
-        list.innerHTML = '<div class="item-empty">ยังไม่พบรายการจาก ARMbot · รอ topic armbot-010eb21b/items</div>';
+        list.innerHTML = '<div class="item-empty">ยังไม่พบรายการอุปกรณ์จาก ARMbot</div>';
         return;
       }
       for (const item of items) {
