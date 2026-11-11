@@ -66,6 +66,7 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME", "").strip()
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 MQTT_QUEUE_TOPIC = os.getenv("MQTT_QUEUE_TOPIC", "armbot/cmd/queue").strip()
+MQTT_ITEMS_TOPIC = os.getenv("MQTT_ITEMS_TOPIC", "armbot/items").strip()
 MQTT_EVENT_TOPIC = os.getenv("MQTT_EVENT_TOPIC", "armbot/event").strip()
 MQTT_STATUS_TOPIC = os.getenv("MQTT_STATUS_TOPIC", "armbot/status").strip()
 MQTT_RECEIVE_TIMEOUT_SECONDS = float(
@@ -357,13 +358,21 @@ class MqttReceivingService:
         self._client: mqtt.Client | None = None
         self._timer: threading.Timer | None = None
         self._job: dict[str, Any] | None = None
+        self._items: list[dict[str, Any]] = []
+        self._items_updated_at: float | None = None
         self._deadline: float | None = None
         self._mqtt_connected = False
         self._mqtt_error: str | None = None
 
     def start(self) -> None:
         if not all(
-            (MQTT_HOST, MQTT_QUEUE_TOPIC, MQTT_EVENT_TOPIC, MQTT_STATUS_TOPIC)
+            (
+                MQTT_HOST,
+                MQTT_QUEUE_TOPIC,
+                MQTT_ITEMS_TOPIC,
+                MQTT_EVENT_TOPIC,
+                MQTT_STATUS_TOPIC,
+            )
         ):
             raise RuntimeError("MQTT host and topic settings must not be empty")
         if not 1 <= MQTT_PORT <= 65535:
@@ -414,6 +423,8 @@ class MqttReceivingService:
                 "connected": self._mqtt_connected,
                 "error": self._mqtt_error,
                 "job": self._job_snapshot_locked(),
+                "items": [dict(item) for item in self._items],
+                "items_updated_at": self._items_updated_at,
             }
 
     def attach_camera(self, job_id: str) -> None:
@@ -484,7 +495,9 @@ class MqttReceivingService:
                 self._mqtt_error = error
             LOGGER.error(error)
             return
-        result, _ = client.subscribe(MQTT_QUEUE_TOPIC, qos=1)
+        result, _ = client.subscribe(
+            [(MQTT_QUEUE_TOPIC, 1), (MQTT_ITEMS_TOPIC, 1)]
+        )
         with self._lock:
             self._mqtt_connected = result == mqtt.MQTT_ERR_SUCCESS
             self._mqtt_error = (
@@ -525,6 +538,10 @@ class MqttReceivingService:
             payload = json.loads(message.payload.decode("utf-8"))
             if not isinstance(payload, dict):
                 raise TypeError("MQTT payload must be a JSON object")
+
+            if message.topic == MQTT_ITEMS_TOPIC:
+                self._update_item_catalog(payload)
+                return
 
             source = payload.get("source", "mqtt")
             if not isinstance(source, str):
@@ -589,6 +606,44 @@ class MqttReceivingService:
             item_id=item_id,
             source=payload.get("source", "mqtt"),
         )
+
+    def _update_item_catalog(self, payload: dict[str, Any]) -> None:
+        raw_items = payload.get("items")
+        if not isinstance(raw_items, list):
+            raise TypeError("MQTT items payload must contain an items array")
+
+        items: list[dict[str, Any]] = []
+        for raw_item in raw_items[:100]:
+            if not isinstance(raw_item, dict):
+                continue
+            item_id = raw_item.get("id") or raw_item.get("item_id")
+            if not isinstance(item_id, str) or not item_id.strip():
+                continue
+            name = raw_item.get("name")
+            name_th = raw_item.get("name_th")
+            items.append(
+                {
+                    "id": item_id.strip(),
+                    "name": name.strip() if isinstance(name, str) else item_id.strip(),
+                    "name_th": (
+                        name_th.strip()
+                        if isinstance(name_th, str) and name_th.strip()
+                        else None
+                    ),
+                    "barcode": raw_item.get("barcode")
+                    if isinstance(raw_item.get("barcode"), str)
+                    else None,
+                    "stock": raw_item.get("stock")
+                    if isinstance(raw_item.get("stock"), int)
+                    else None,
+                    "yolo_class": raw_item.get("yolo_class")
+                    if isinstance(raw_item.get("yolo_class"), str)
+                    else ITEM_TO_YOLO_CLASS.get(item_id.strip().lower()),
+                }
+            )
+        with self._lock:
+            self._items = items
+            self._items_updated_at = time.time()
 
     def submit(
         self,

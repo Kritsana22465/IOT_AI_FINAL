@@ -51,9 +51,11 @@ const char API_KEY[] = "ค่าเดียวกับ ARDUINO_API_KEY";
 ## รับรายการอุปกรณ์ผ่าน MQTT
 
 Dashboard เชื่อมต่อ broker `broker.hivemq.com:1883` โดยใช้ prefix `armbot` และ subscribe topic
-`armbot/cmd/queue`, publish event ไปที่ `armbot/event` และ publish retained status
-ไปที่ `armbot/status` สามารถกำหนด `MQTT_HOST`, `MQTT_PORT`, `MQTT_QUEUE_TOPIC`,
-`MQTT_EVENT_TOPIC`, `MQTT_STATUS_TOPIC` และ `MQTT_RECEIVE_TIMEOUT_SECONDS`
+`armbot/cmd/queue` เพื่อรับคิวหยิบ และ `armbot/items` เพื่อดึงรายการอุปกรณ์จาก ARMbot
+มาแสดงในหน้า Dashboard (รายการนี้เป็น retained message) จากนั้น publish event ไปที่
+`armbot/event` และ publish retained status ไปที่ `armbot/status` สามารถกำหนด
+`MQTT_HOST`, `MQTT_PORT`, `MQTT_QUEUE_TOPIC`, `MQTT_ITEMS_TOPIC`, `MQTT_EVENT_TOPIC`,
+`MQTT_STATUS_TOPIC` และ `MQTT_RECEIVE_TIMEOUT_SECONDS`
 ผ่าน environment variables
 
 ตัวอย่างส่งคำขอ:
@@ -79,8 +81,8 @@ event `completed` พร้อม status `ready` หากครบ 120 วิ�
 เปิดกล้องและตรวจสอบรายการ → แสดงผลว่าครบ/ไม่ครบ → บันทึกรูปผลตรวจและปิดกล้อง
 โดยไม่ต้องแก้ Dashboard ของเพื่อน เปิดหน้า Dashboard ค้างไว้ อนุญาตการใช้กล้อง
 และเลือกกล้องให้พร้อม ระบบเก็บจำนวนสูงสุดที่เห็นพร้อมกันในแต่ละคลาสระหว่างงาน
-จึงไม่บวกวัตถุชิ้นเดิมซ้ำจากทุกเฟรม รูปแบบคำขอ `job_id`/`items` แบบเดิมยังรองรับ
-อยู่ด้วย
+จึงไม่บวกวัตถุชิ้นเดิมซ้ำจากทุกเฟรม และแสดงรายการจาก `armbot/items` แยกไว้ให้ดูว่า
+มีอุปกรณ์ใดจาก ARMbot ที่พร้อมตรวจสอบ รูปแบบคำขอ `job_id`/`items` แบบเดิมยังรองรับอยู่ด้วย
 
 กำหนด `MQTT_USERNAME` และ `MQTT_PASSWORD` เป็น environment variables ในเครื่อง
 หรือเป็น GitHub Actions secrets ชื่อเดียวกันสำหรับ deploy; ไม่ใส่ credential

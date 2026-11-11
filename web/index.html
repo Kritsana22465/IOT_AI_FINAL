@@ -90,6 +90,16 @@
     .notice.receiving-completed { color: var(--green); border-color: #34795b; }
     .notice.receiving-incomplete { color: var(--red); border-color: #713744; }
     .notice.receiving-in_progress { color: var(--cyan); border-color: #2f6f78; }
+    .item-panel { margin-top: 16px; }
+    .item-list { display: grid; gap: 8px; padding: 14px 20px 18px; }
+    .item-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 12px; background: #0f1726; border: 1px solid var(--line); border-radius: 10px; }
+    .item-row.active { border-color: var(--cyan); background: #102a35; }
+    .item-name { font-weight: 700; }
+    .item-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .item-badge { color: var(--muted); font-size: 12px; text-align: right; white-space: nowrap; }
+    .item-badge.active { color: var(--cyan); }
+    .item-badge.ready { color: var(--green); }
+    .item-empty { color: var(--muted); font-size: 12px; padding: 2px 0; }
     .event-list { display: grid; gap: 10px; padding: 16px 20px 20px; max-height: 350px; overflow-y: auto; }
     .event-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%; padding: 9px; color: var(--text); text-align: left; background: #0f1726; border: 1px solid var(--line); border-radius: 11px; }
     .event-item:hover { border-color: var(--cyan); }
@@ -193,6 +203,18 @@
         <div class="notice" id="receiving-status" aria-live="polite">
           MQTT: กำลังเชื่อมต่อ
         </div>
+        <section class="panel item-panel">
+          <div class="panel-head">
+            <div>
+              <h2>รายการอุปกรณ์จาก ARMbot</h2>
+              <p class="tiny">ข้อมูลจาก topic <code>armbot/items</code> สำหรับเทียบรายการที่ต้องตรวจ</p>
+            </div>
+            <span class="tiny" id="armbot-item-count">0 รายการ</span>
+          </div>
+          <div id="armbot-item-list" class="item-list" aria-live="polite">
+            <div class="item-empty">กำลังรอรายการจาก ARMbot...</div>
+          </div>
+        </section>
       </section>
 
       <aside class="side">
@@ -387,6 +409,7 @@
       renderCamera(data.camera);
       renderArduino(data.arduino);
       renderReceiving(data.receiving);
+      renderArmBotItems(data.receiving);
       maybeStopReceivingCamera(data.camera, data.receiving);
       maybeStartTriggeredCapture(data.arduino, data.receiving);
       const online = data.camera.running || data.arduino.connected
@@ -418,6 +441,48 @@
       }[job.status] || job.status;
       box.classList.add(`receiving-${job.status}`);
       box.textContent = `สถานะรับอุปกรณ์: ${statusLabel} · ${progress} · ${job.message}`;
+    }
+
+    function renderArmBotItems(receiving) {
+      const list = byId("armbot-item-list");
+      const items = receiving?.items || [];
+      const activeJob = receiving?.job;
+      byId("armbot-item-count").textContent = `${items.length} รายการ`;
+      list.replaceChildren();
+      if (!receiving?.connected) {
+        list.innerHTML = '<div class="item-empty">ยังไม่ได้เชื่อมต่อ MQTT</div>';
+        return;
+      }
+      if (!items.length) {
+        list.innerHTML = '<div class="item-empty">ยังไม่พบรายการจาก ARMbot · รอ topic armbot/items</div>';
+        return;
+      }
+      for (const item of items) {
+        const row = document.createElement("div");
+        const isActive = activeJob?.item_id === item.id
+          && ["waiting_ir", "in_progress"].includes(activeJob.status);
+        row.className = `item-row${isActive ? " active" : ""}`;
+        const details = document.createElement("div");
+        const name = document.createElement("div");
+        name.className = "item-name";
+        name.textContent = item.name_th || item.name || item.id;
+        const meta = document.createElement("div");
+        meta.className = "item-meta";
+        const stock = item.stock === null || item.stock === undefined
+          ? "ไม่ทราบจำนวนคงเหลือ"
+          : `คงเหลือ ${item.stock}`;
+        meta.textContent = `${item.id} · ${stock}`;
+        details.append(name, meta);
+        const badge = document.createElement("div");
+        badge.className = `item-badge${isActive ? " active" : item.yolo_class ? " ready" : ""}`;
+        badge.textContent = isActive
+          ? "อยู่ในคิวตรวจสอบ"
+          : item.yolo_class
+            ? "พร้อมตรวจด้วย AI"
+            : "ยังไม่ผูกกับโมเดล";
+        row.append(details, badge);
+        list.append(row);
+      }
     }
 
     async function refreshStatus() {
