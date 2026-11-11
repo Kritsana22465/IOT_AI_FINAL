@@ -85,14 +85,6 @@
     .connection-info strong { color: var(--cyan); }
     .error { display: none; padding: 11px 13px; color: #ffd5da; background: #482531; border: 1px solid #713744; border-radius: 10px; font-size: 13px; }
     .error.visible { display: block; }
-    .notice { margin-top: 16px; padding: 12px 14px; color: var(--muted); font-size: 12px; border: 1px solid var(--line); border-radius: 11px; }
-    .notice strong { color: var(--amber); }
-    .notice.receiving-completed { color: var(--green); border-color: #34795b; }
-    .notice.receiving-incomplete { color: var(--red); border-color: #713744; }
-    .notice.receiving-in_progress { color: var(--cyan); border-color: #2f6f78; }
-    .manual-scan-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: stretch; }
-    .manual-scan-row .notice { margin-top: 16px; }
-    .manual-scan-button { align-self: stretch; margin-top: 16px; }
     .item-panel { margin-top: 16px; }
     .item-list { display: grid; gap: 8px; padding: 14px 20px 18px; }
     .item-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 12px; background: #0f1726; border: 1px solid var(--line); border-radius: 10px; }
@@ -131,8 +123,6 @@
       .shell { padding: 20px 13px 35px; }
       header { align-items: flex-start; flex-direction: column; }
       .side { grid-template-columns: 1fr; }
-      .manual-scan-row { grid-template-columns: 1fr; }
-      .manual-scan-button { margin-top: 0; }
       .cards { gap: 8px; }
       .metric { padding: 12px; }
       .metric-name { font-size: 11px; }
@@ -227,20 +217,6 @@
     .camera-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
     .queue-panel { margin-top: 16px; }
     .queue-body { padding: 0 20px 18px; }
-    .manual-scan-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; }
-    .manual-scan-row .notice { margin-top: 0; }
-    .manual-scan-button { margin-top: 0; min-width: 130px; }
-    .notice {
-      margin-top: 0;
-      padding: 11px 13px;
-      color: #536277;
-      background: #f8fafc;
-      border-color: var(--line);
-      border-radius: 10px;
-    }
-    .notice.receiving-completed { color: var(--green); background: #effaf5; border-color: #bde8d5; }
-    .notice.receiving-incomplete { color: var(--red); background: #fff3f4; border-color: #f0cbd0; }
-    .notice.receiving-in_progress { color: #087d83; background: #ecfbfb; border-color: #b9e8e8; }
     .item-panel { margin-top: 16px; }
     .item-list { padding: 12px 20px 18px; }
     .item-row { background: #fbfcfe; border-color: var(--line); }
@@ -278,8 +254,6 @@
       .camera-controls button { width: 100%; }
       .camera-settings { grid-column: auto; }
       .camera-settings-grid { grid-template-columns: 1fr; }
-      .manual-scan-row { grid-template-columns: 1fr; }
-      .manual-scan-button { width: 100%; }
       .video-frame { min-height: 220px; }
     }
   </style>
@@ -313,7 +287,7 @@
             <img id="camera-stream" alt="ภาพจากกล้องพร้อมกรอบตรวจจับ">
             <div class="video-empty">
               <div class="camera-icon">▣</div>
-              <div id="video-message">เมื่อมีคิวรับอุปกรณ์ ให้กด Manual Scan เพื่อเริ่มตรวจสอบ</div>
+              <div id="video-message">เมื่อมีรายการและ IR พบอุปกรณ์ กล้องจะเปิดตรวจให้อัตโนมัติ</div>
             </div>
           </div>
           <div class="camera-controls">
@@ -342,22 +316,14 @@
         <section class="panel queue-panel">
           <div class="panel-head">
             <div>
-              <h2>คิวรับอุปกรณ์ล่าสุด</h2>
-              <p class="tiny">รายการที่เพื่อนสั่งหยิบและรอการตรวจสอบ</p>
+              <h2>อุปกรณ์ที่จะตรวจ</h2>
+              <p class="tiny">เมื่อ IR พบอุปกรณ์ กล้องจะเปิดและตรวจให้อัตโนมัติ</p>
             </div>
             <span class="tiny" id="armbot-item-count">0 รายการ</span>
           </div>
           <div class="queue-body">
-            <div class="manual-scan-row">
-              <div class="notice" id="receiving-status" aria-live="polite">
-                กำลังตรวจสอบคิวล่าสุด
-              </div>
-              <button id="manual-scan-button" class="manual-scan-button" onclick="manualScan()" disabled>
-                Manual Scan
-              </button>
-            </div>
             <div id="armbot-item-list" class="item-list" aria-live="polite">
-              <div class="item-empty">กำลังรอรายการจาก ARMbot...</div>
+              <div class="item-empty">กำลังรอรายการที่จะหยิบ...</div>
             </div>
           </div>
         </section>
@@ -399,9 +365,9 @@
             </div>
           </div>
           <div class="system-body">
-            <div class="relay-row" style="border:0;padding-top:0"><span>1. ตรวจคิวล่าสุด</span><strong>รอรายการ</strong></div>
-            <div class="relay-row"><span>2. เปิดกล้อง</span><strong>กด Manual Scan</strong></div>
-            <div class="relay-row"><span>3. ตรวจครบแล้ว</span><strong>บันทึกรูปอัตโนมัติ</strong></div>
+            <div class="relay-row" style="border:0;padding-top:0"><span>1. รับรายการที่จะหยิบ</span><strong>อัตโนมัติ</strong></div>
+            <div class="relay-row"><span>2. IR พบอุปกรณ์</span><strong>เปิดกล้อง</strong></div>
+            <div class="relay-row"><span>3. ตรวจครบแล้ว</span><strong>บันทึกรูป</strong></div>
           </div>
         </section>
 
@@ -442,7 +408,6 @@
     let lastCaptureRequestId = null;
     let captureRetryAt = 0;
     let captureClosing = false;
-    let manualScanInFlight = false;
     let receivingCameraStopInFlight = false;
     let errorTimer;
 
@@ -477,7 +442,9 @@
 
     function renderCamera(camera) {
       cameraRunning = camera.running;
-      cameraTestMode = cameraRunning && camera.record_events === false;
+      cameraTestMode = cameraRunning
+        && camera.record_events === false
+        && !camera.receiving_job_id;
       byId("camera-button").textContent = cameraRunning
         ? (camera.receiving_job_id
           ? "หยุดรับรายการ"
@@ -507,7 +474,7 @@
             ? "เปิดกล้องรอจนรายการครบ · จะบันทึกรูปและปิดกล้องเมื่อครบ"
           : cameraTestMode
             ? "กำลังทดสอบกล้อง ภาพจะไม่ถูกบันทึกลงประวัติ"
-            : "เมื่อ IR ตรวจพบอุปกรณ์ ระบบจะเปิดกล้องและบันทึกให้อัตโนมัติ");
+            : "เมื่อมีรายการและ IR พบอุปกรณ์ กล้องจะเปิดตรวจให้อัตโนมัติ");
       byId("fps").textContent = cameraRunning ? `${camera.fps} FPS` : "-- FPS";
       const totalCount = byId("total-count");
       if (totalCount) totalCount.textContent = camera.total || 0;
@@ -549,126 +516,53 @@
     function renderStatus(data) {
       renderCamera(data.camera);
       renderArduino(data.arduino);
-      renderReceiving(data.receiving);
-      renderArmBotItems(data.receiving);
-      renderManualScanButton(data.receiving);
+      renderRequestedItems(data.receiving);
       maybeStopReceivingCamera(data.camera, data.receiving);
       maybeStartTriggeredCapture(data.arduino, data.receiving);
-      const online = data.camera.running || data.arduino.connected
-        || data.receiving?.connected;
+      const online = data.camera.running || data.arduino.connected;
       byId("system-status").textContent = online ? "ระบบออนไลน์" : "ระบบพร้อมใช้งาน";
       byId("system-status").classList.toggle("online", online);
     }
 
-    function renderReceiving(receiving) {
-      const box = byId("receiving-status");
-      box.className = "notice";
-      if (!receiving?.connected) {
-        box.textContent = `ยังเชื่อมต่อระบบคิวไม่ได้${receiving?.error ? ` · ${receiving.error}` : ""}`;
-        return;
-      }
-      const job = receiving.job;
-      if (!job) {
-        box.textContent = "ยังไม่มีคิวรับอุปกรณ์ล่าสุด";
-        return;
-      }
-      const progress = Object.entries(job.progress || {})
-        .map(([name, count]) => `${name} ${count.detected}/${count.requested}`)
-        .join(" · ");
-      const statusLabel = {
-        waiting_ir: "รอ IR ตรวจพบอุปกรณ์",
-        in_progress: "กำลังตรวจสอบอุปกรณ์",
-        completed: "อุปกรณ์ครบ",
-        incomplete: "อุปกรณ์ไม่ครบ"
-      }[job.status] || job.status;
-      box.classList.add(`receiving-${job.status}`);
-      box.textContent = `${statusLabel} · ${progress} · ${job.message}`;
-    }
-
-    function renderArmBotItems(receiving) {
+    function renderRequestedItems(receiving) {
       const list = byId("armbot-item-list");
-      const items = receiving?.items || [];
-      const activeJob = receiving?.job;
-      byId("armbot-item-count").textContent = `${items.length} รายการ`;
+      const job = receiving?.job;
+      const entries = Object.entries(job?.progress || {});
+      const requestedCount = entries.reduce(
+        (total, [, progress]) => total + Number(progress.requested || 0),
+        0
+      );
+      byId("armbot-item-count").textContent = job
+        ? `${requestedCount} ชิ้น`
+        : "0 รายการ";
       list.replaceChildren();
-      if (!receiving?.connected) {
-        list.innerHTML = '<div class="item-empty">ยังเชื่อมต่อรายการจาก ARMbot ไม่สำเร็จ</div>';
+      if (!job || !entries.length) {
+        list.innerHTML = '<div class="item-empty">ยังไม่มีรายการที่จะหยิบ</div>';
         return;
       }
-      if (!items.length) {
-        list.innerHTML = '<div class="item-empty">ยังไม่พบรายการอุปกรณ์จาก ARMbot</div>';
-        return;
-      }
-      for (const item of items) {
+      for (const [requestedName, progress] of entries) {
         const row = document.createElement("div");
-        const isActive = activeJob?.item_id === item.id
-          && ["waiting_ir", "in_progress"].includes(activeJob.status);
+        const isActive = ["waiting_ir", "in_progress"].includes(job.status);
         row.className = `item-row${isActive ? " active" : ""}`;
         const details = document.createElement("div");
-        const name = document.createElement("div");
-        name.className = "item-name";
-        name.textContent = item.name_th || item.name || item.id;
+        const nameElement = document.createElement("div");
+        nameElement.className = "item-name";
+        nameElement.textContent = requestedName;
         const meta = document.createElement("div");
         meta.className = "item-meta";
-        const stock = item.stock === null || item.stock === undefined
-          ? "ไม่ทราบจำนวนคงเหลือ"
-          : `คงเหลือ ${item.stock}`;
-        meta.textContent = `${item.id} · ${stock}`;
-        details.append(name, meta);
+        meta.textContent = `${progress.detected}/${progress.requested} ชิ้น`;
+        details.append(nameElement, meta);
         const badge = document.createElement("div");
-        badge.className = `item-badge${isActive ? " active" : item.yolo_class ? " ready" : ""}`;
-        badge.textContent = isActive
-          ? "อยู่ในคิวตรวจสอบ"
-          : item.yolo_class
-            ? "พร้อมตรวจด้วย AI"
-            : "ยังไม่ผูกกับโมเดล";
+        badge.className = `item-badge${isActive ? " active" : ""}`;
+        badge.textContent = job.status === "completed"
+          ? "ตรวจครบแล้ว"
+          : job.status === "incomplete"
+            ? "ตรวจไม่ครบ"
+            : job.status === "in_progress"
+              ? "กำลังตรวจ"
+              : "รอ IR";
         row.append(details, badge);
         list.append(row);
-      }
-    }
-
-    function renderManualScanButton(receiving) {
-      const button = byId("manual-scan-button");
-      const job = receiving?.job;
-      const available = receiving?.connected && job?.status === "waiting_ir";
-      button.disabled = manualScanInFlight || !available;
-      button.title = available
-        ? `สแกนคิวล่าสุด: ${job.item_id || job.job_id}`
-        : "ต้องมีคิวล่าสุดที่กำลังรอ IR ก่อนจึงจะ Manual Scan ได้";
-    }
-
-    async function manualScan() {
-      if (manualScanInFlight) return;
-      manualScanInFlight = true;
-      const button = byId("manual-scan-button");
-      button.disabled = true;
-      button.textContent = "กำลังเปิดกล้อง...";
-      try {
-        const status = await request("/api/status");
-        renderStatus(status);
-        const job = status.receiving?.job;
-        if (!job) throw new Error("ยังไม่มีคิวล่าสุดจาก ARMbot");
-        if (job.status !== "waiting_ir") {
-          throw new Error(
-            job.status === "in_progress"
-              ? "คิวนี้กำลังตรวจด้วยกล้องอยู่แล้ว"
-              : "คิวล่าสุดถูกตรวจเสร็จแล้วหรือหมดอายุ"
-          );
-        }
-        if (cameraRunning) {
-          if (!cameraTestMode) {
-            throw new Error("กรุณาหยุดกล้องที่กำลังใช้งานก่อน Manual Scan");
-          }
-          await stopBrowserCamera();
-        }
-        await startBrowserCamera(null, false, job.job_id);
-        await refreshStatus();
-      } catch (error) {
-        showError(`Manual Scan ไม่ได้: ${error.message}`);
-      } finally {
-        manualScanInFlight = false;
-        button.textContent = "Manual Scan";
-        await refreshStatus();
       }
     }
 
@@ -840,7 +734,7 @@
 
     async function maybeStartTriggeredCapture(arduino, receiving) {
       const job = receiving?.job;
-      if (job && job.status !== "waiting_ir") return;
+      if (!job || job.status !== "waiting_ir") return;
       const requestId = arduino.capture_request_id;
       if (!arduino.capture_pending || !requestId || requestId === lastCaptureRequestId) return;
       if (captureRequestInFlight || Date.now() < captureRetryAt) return;
@@ -850,8 +744,7 @@
           if (!cameraTestMode) return;
           await stopBrowserCamera();
         }
-        const receivingJobId = job?.job_id || null;
-        await startBrowserCamera(requestId, receivingJobId ? false : true, receivingJobId);
+        await startBrowserCamera(requestId, false, job.job_id);
         await request("/api/capture/ack", {
           method: "POST",
           body: JSON.stringify({ request_id: requestId })

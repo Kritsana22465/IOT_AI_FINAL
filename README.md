@@ -50,11 +50,10 @@ const char API_KEY[] = "ค่าเดียวกับ ARDUINO_API_KEY";
 
 ## รับรายการอุปกรณ์ผ่าน MQTT
 
-Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ่าน WebSocket + TLS โดยใช้ prefix `armbot-010eb21b` และ subscribe topic
-`armbot-010eb21b/cmd/queue` เพื่อรับคิวหยิบ และ `armbot-010eb21b/items` เพื่อดึงรายการอุปกรณ์จาก ARMbot
-มาแสดงในหน้า Dashboard (รายการนี้เป็น retained message) จากนั้น publish event ไปที่
+Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ่าน WebSocket + TLS โดยใช้ prefix `armbot-010eb21b` และ subscribe เฉพาะ topic
+`armbot-010eb21b/cmd/queue` เพื่อรับรายการที่กำลังจะหยิบ จากนั้น publish event ไปที่
 `armbot-010eb21b/event` และ publish retained status ไปที่ `armbot-010eb21b/status` สามารถกำหนด
-`MQTT_HOST`, `MQTT_PORT`, `MQTT_QUEUE_TOPIC`, `MQTT_ITEMS_TOPIC`, `MQTT_EVENT_TOPIC`,
+`MQTT_HOST`, `MQTT_PORT`, `MQTT_QUEUE_TOPIC`, `MQTT_EVENT_TOPIC`,
 `MQTT_STATUS_TOPIC` และ `MQTT_RECEIVE_TIMEOUT_SECONDS`
 ผ่าน environment variables
 
@@ -81,13 +80,10 @@ event `completed` พร้อม status `ready` หากภายใน 120 �
 ลำดับการทำงานคือ เพื่อนกดหยิบ → ARMbot วางอุปกรณ์ → IR ตรวจพบ → Dashboard นี้
 เปิดกล้องและตรวจสอบรายการ → แสดงผลว่าครบ/ไม่ครบ → บันทึกรูปผลตรวจและปิดกล้อง
 โดยไม่ต้องแก้ Dashboard ของเพื่อน เปิดหน้า Dashboard ค้างไว้ อนุญาตการใช้กล้อง
-และเลือกกล้องให้พร้อม ระบบเก็บจำนวนสูงสุดที่เห็นพร้อมกันในแต่ละคลาสระหว่างงาน
-จึงไม่บวกวัตถุชิ้นเดิมซ้ำจากทุกเฟรม และแสดงรายการจาก `armbot-010eb21b/items` แยกไว้ให้ดูว่า
-มีอุปกรณ์ใดจาก ARMbot ที่พร้อมตรวจสอบ รูปแบบคำขอ `job_id`/`items` แบบเดิมยังรองรับอยู่ด้วย
-
-ปุ่ม `Manual Scan` ในหน้า Dashboard จะใช้คิวล่าสุดที่อยู่สถานะรอ IR มาเปิดกล้องตรวจสอบ
-ทันทีโดยไม่ต้องรอ IR เหมาะสำหรับทดสอบรายการที่เพื่อนสั่งหยิบ เมื่ออุปกรณ์ครบตามคิว
-ระบบจะบันทึกรูปและปิดกล้องตาม flow เดียวกับการทำงานอัตโนมัติ
+และเลือกกล้องให้พร้อม ระบบจะแสดงเฉพาะอุปกรณ์ในคิวที่จะหยิบ ไม่ดึง catalog ทั้งหมดมาแสดง
+เมื่อ IR ตรวจพบอุปกรณ์ ระบบจะเปิดกล้องและตรวจตามรายการในคิวโดยอัตโนมัติ
+ระบบเก็บจำนวนสูงสุดที่เห็นพร้อมกันในแต่ละคลาสระหว่างงาน จึงไม่บวกวัตถุชิ้นเดิมซ้ำจากทุกเฟรม
+เมื่อครบจะบันทึกรูปและปิดกล้องตาม flow อัตโนมัติ รูปแบบคำขอ `job_id`/`items` แบบเดิมยังรองรับอยู่ด้วย
 
 กำหนด `MQTT_USERNAME` และ `MQTT_PASSWORD` เป็น environment variables ในเครื่อง
 หรือเป็น GitHub Actions secrets ชื่อเดียวกันสำหรับ deploy; ไม่ใส่ credential
