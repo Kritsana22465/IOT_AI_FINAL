@@ -90,11 +90,9 @@
     .notice.receiving-completed { color: var(--green); border-color: #34795b; }
     .notice.receiving-incomplete { color: var(--red); border-color: #713744; }
     .notice.receiving-in_progress { color: var(--cyan); border-color: #2f6f78; }
-    .mqtt-test-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: stretch; }
-    .mqtt-test-row .notice { margin-top: 16px; }
-    .mqtt-test-button { align-self: stretch; margin-top: 16px; }
-    .mqtt-test-result { display: none; max-height: 330px; margin: 10px 0 0; padding: 12px 14px; overflow: auto; color: var(--text); background: #0b111d; border: 1px solid var(--line); border-radius: 11px; font: 12px/1.55 Consolas, monospace; white-space: pre-wrap; }
-    .mqtt-test-result.visible { display: block; }
+    .manual-scan-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: stretch; }
+    .manual-scan-row .notice { margin-top: 16px; }
+    .manual-scan-button { align-self: stretch; margin-top: 16px; }
     .item-panel { margin-top: 16px; }
     .item-list { display: grid; gap: 8px; padding: 14px 20px 18px; }
     .item-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 12px; background: #0f1726; border: 1px solid var(--line); border-radius: 10px; }
@@ -133,8 +131,8 @@
       .shell { padding: 20px 13px 35px; }
       header { align-items: flex-start; flex-direction: column; }
       .side { grid-template-columns: 1fr; }
-      .mqtt-test-row { grid-template-columns: 1fr; }
-      .mqtt-test-button { margin-top: 0; }
+      .manual-scan-row { grid-template-columns: 1fr; }
+      .manual-scan-button { margin-top: 0; }
       .cards { gap: 8px; }
       .metric { padding: 12px; }
       .metric-name { font-size: 11px; }
@@ -193,15 +191,14 @@
             <button id="camera-button" onclick="toggleCamera()">ทดสอบกล้อง</button>
           </div>
         </div>
-        <div class="mqtt-test-row">
+        <div class="manual-scan-row">
           <div class="notice" id="receiving-status" aria-live="polite">
             MQTT: กำลังเชื่อมต่อ
           </div>
-          <button id="mqtt-test-button" class="secondary mqtt-test-button" onclick="testMqttSubscriptions()">
-            ตรวจสอบ MQTT
+          <button id="manual-scan-button" class="secondary manual-scan-button" onclick="manualScan()" disabled>
+            Manual Scan
           </button>
         </div>
-        <pre id="mqtt-test-result" class="mqtt-test-result" aria-live="polite"></pre>
         <section class="panel item-panel">
           <div class="panel-head">
             <div>
@@ -301,6 +298,7 @@
     let lastCaptureRequestId = null;
     let captureRetryAt = 0;
     let captureClosing = false;
+    let manualScanInFlight = false;
     let receivingCameraStopInFlight = false;
     let errorTimer;
 
@@ -405,6 +403,7 @@
       renderArduino(data.arduino);
       renderReceiving(data.receiving);
       renderArmBotItems(data.receiving);
+      renderManualScanButton(data.receiving);
       maybeStopReceivingCamera(data.camera, data.receiving);
       maybeStartTriggeredCapture(data.arduino, data.receiving);
       const online = data.camera.running || data.arduino.connected
@@ -480,37 +479,48 @@
       }
     }
 
-    function renderMqttTest(result) {
-      const box = byId("mqtt-test-result");
-      const lines = [`ผลการทดสอบ: ${result.message || "ไม่ทราบผล"}`];
-      for (const topic of result.topics || []) {
-        lines.push(
-          "",
-          `Topic: ${topic.topic}`,
-          `Subscribe: ${topic.subscribed ? "สำเร็จ" : "ไม่สำเร็จ"}`,
-          `ได้รับข้อความในช่วงทดสอบ: ${topic.message_received ? "ใช่" : "ไม่พบ"}`,
-          topic.payload
-            ? `Payload:\n${JSON.stringify(topic.payload, null, 2)}`
-            : `หมายเหตุ: ${topic.note || "ยังไม่มี payload"}`
-        );
-      }
-      box.textContent = lines.join("\n");
-      box.classList.add("visible");
+    function renderManualScanButton(receiving) {
+      const button = byId("manual-scan-button");
+      const job = receiving?.job;
+      const available = receiving?.connected && job?.status === "waiting_ir";
+      button.disabled = manualScanInFlight || !available;
+      button.title = available
+        ? `สแกนคิวล่าสุด: ${job.item_id || job.job_id}`
+        : "ต้องมีคิวล่าสุดที่กำลังรอ IR ก่อนจึงจะ Manual Scan ได้";
     }
 
-    async function testMqttSubscriptions() {
-      const button = byId("mqtt-test-button");
+    async function manualScan() {
+      if (manualScanInFlight) return;
+      manualScanInFlight = true;
+      const button = byId("manual-scan-button");
       button.disabled = true;
-      button.textContent = "กำลังตรวจสอบ...";
+      button.textContent = "กำลังเปิดกล้อง...";
       try {
-        const result = await request("/api/mqtt/test", { method: "POST" });
-        renderMqttTest(result);
+        const status = await request("/api/status");
+        renderStatus(status);
+        const job = status.receiving?.job;
+        if (!job) throw new Error("ยังไม่มีคิวล่าสุดจาก ARMbot");
+        if (job.status !== "waiting_ir") {
+          throw new Error(
+            job.status === "in_progress"
+              ? "คิวนี้กำลังตรวจด้วยกล้องอยู่แล้ว"
+              : "คิวล่าสุดถูกตรวจเสร็จแล้วหรือหมดอายุ"
+          );
+        }
+        if (cameraRunning) {
+          if (!cameraTestMode) {
+            throw new Error("กรุณาหยุดกล้องที่กำลังใช้งานก่อน Manual Scan");
+          }
+          await stopBrowserCamera();
+        }
+        await startBrowserCamera(null, false, job.job_id);
         await refreshStatus();
       } catch (error) {
-        showError(`ทดสอบ MQTT ไม่ได้: ${error.message}`);
+        showError(`Manual Scan ไม่ได้: ${error.message}`);
       } finally {
-        button.disabled = false;
-        button.textContent = "ตรวจสอบ MQTT";
+        manualScanInFlight = false;
+        button.textContent = "Manual Scan";
+        await refreshStatus();
       }
     }
 
