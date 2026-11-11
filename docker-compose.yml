@@ -30,7 +30,10 @@ services:
       SENSOR_TIMEOUT_SECONDS: 5
       ARDUINO_API_KEY: ${ARDUINO_API_KEY:-}
       MQTT_HOST: ${MQTT_HOST:-broker.hivemq.com}
-      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_PORT: ${MQTT_PORT:-8884}
+      MQTT_TRANSPORT: ${MQTT_TRANSPORT:-websockets}
+      MQTT_TLS: ${MQTT_TLS:-1}
+      MQTT_WS_PATH: ${MQTT_WS_PATH:-/mqtt}
       MQTT_USERNAME: ${MQTT_USERNAME:-}
       MQTT_PASSWORD: ${MQTT_PASSWORD:-}
       MQTT_QUEUE_TOPIC: ${MQTT_QUEUE_TOPIC:-armbot/cmd/queue}

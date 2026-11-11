@@ -50,7 +50,7 @@ const char API_KEY[] = "ค่าเดียวกับ ARDUINO_API_KEY";
 
 ## รับรายการอุปกรณ์ผ่าน MQTT
 
-Dashboard เชื่อมต่อ broker `broker.hivemq.com:1883` โดยใช้ prefix `armbot` และ subscribe topic
+Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ่าน WebSocket + TLS โดยใช้ prefix `armbot` และ subscribe topic
 `armbot/cmd/queue` เพื่อรับคิวหยิบ และ `armbot/items` เพื่อดึงรายการอุปกรณ์จาก ARMbot
 มาแสดงในหน้า Dashboard (รายการนี้เป็น retained message) จากนั้น publish event ไปที่
 `armbot/event` และ publish retained status ไปที่ `armbot/status` สามารถกำหนด
@@ -86,8 +86,7 @@ event `completed` พร้อม status `ready` หากครบ 120 วิ�
 
 กำหนด `MQTT_USERNAME` และ `MQTT_PASSWORD` เป็น environment variables ในเครื่อง
 หรือเป็น GitHub Actions secrets ชื่อเดียวกันสำหรับ deploy; ไม่ใส่ credential
-ลงใน source code โปรดทราบว่าพอร์ต 1883 ไม่เข้ารหัสการรับส่งข้อมูล หาก broker
-รองรับ TLS ให้ใช้ endpoint/port ที่ broker กำหนด
+ลงใน source code โดยค่าเริ่มต้นใช้ WebSocket + TLS ที่พอร์ต 8884 และ path `/mqtt`
 
 ## Deploy AWS ครั้งแรก
 
@@ -101,7 +100,7 @@ event `completed` พร้อม status `ready` หากครบ 120 วิ�
 - `DOMAIN`: เช่น `12.34.56.78.nip.io` โดยแทนด้วย Elastic IP จริง หรือใช้โดเมนของคุณ
 - `POSTGRES_PASSWORD`: รหัส PostgreSQL ที่ยาวและสุ่ม
 - `ARDUINO_API_KEY`: API key ที่จะใส่ใน Arduino
-- `MQTT_HOST` และ `MQTT_PORT`: ไม่จำเป็น ค่าเริ่มต้นคือ `broker.hivemq.com:1883`
+- `MQTT_HOST`, `MQTT_PORT`, `MQTT_TRANSPORT`, `MQTT_TLS` และ `MQTT_WS_PATH`: ไม่จำเป็น ค่าเริ่มต้นคือ `broker.hivemq.com:8884`, `websockets`, TLS และ `/mqtt`
 - `MQTT_USERNAME` และ `MQTT_PASSWORD`: credential ของ broker ส่วนตัว (ค่าเริ่มต้น HiveMQ ไม่ต้องใช้)
 
 จากนั้น workflow `.github/workflows/deploy-aws.yml` จะทำงานอัตโนมัติ:

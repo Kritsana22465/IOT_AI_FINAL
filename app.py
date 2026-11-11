@@ -62,7 +62,14 @@ SENSOR_TIMEOUT_SECONDS = float(os.getenv("SENSOR_TIMEOUT_SECONDS", "5"))
 REARM_SECONDS = float(os.getenv("REARM_SECONDS", "10"))
 ARDUINO_API_KEY = os.getenv("ARDUINO_API_KEY", "").strip()
 MQTT_HOST = os.getenv("MQTT_HOST", "broker.hivemq.com").strip()
-MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+MQTT_PORT = int(os.getenv("MQTT_PORT", "8884"))
+MQTT_TRANSPORT = os.getenv(
+    "MQTT_TRANSPORT", "websockets" if MQTT_PORT == 8884 else "tcp"
+).strip().lower()
+MQTT_TLS = os.getenv(
+    "MQTT_TLS", "1" if MQTT_PORT in (8883, 8884) else "0"
+).strip().lower() in {"1", "true", "yes", "on"}
+MQTT_WS_PATH = os.getenv("MQTT_WS_PATH", "/mqtt").strip()
 MQTT_USERNAME = os.getenv("MQTT_USERNAME", "").strip()
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 MQTT_QUEUE_TOPIC = os.getenv("MQTT_QUEUE_TOPIC", "armbot/cmd/queue").strip()
@@ -377,6 +384,10 @@ class MqttReceivingService:
             raise RuntimeError("MQTT host and topic settings must not be empty")
         if not 1 <= MQTT_PORT <= 65535:
             raise RuntimeError("MQTT_PORT must be between 1 and 65535")
+        if MQTT_TRANSPORT not in {"tcp", "websockets"}:
+            raise RuntimeError("MQTT_TRANSPORT must be tcp or websockets")
+        if MQTT_TRANSPORT == "websockets" and not MQTT_WS_PATH.startswith("/"):
+            raise RuntimeError("MQTT_WS_PATH must start with /")
         if MQTT_RECEIVE_TIMEOUT_SECONDS <= 0:
             raise RuntimeError("MQTT_RECEIVE_TIMEOUT_SECONDS must be positive")
         if bool(MQTT_USERNAME) != bool(MQTT_PASSWORD):
@@ -390,7 +401,12 @@ class MqttReceivingService:
         client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             client_id=f"iot-dashboard-{uuid.uuid4().hex[:12]}",
+            transport=MQTT_TRANSPORT,
         )
+        if MQTT_TRANSPORT == "websockets":
+            client.ws_set_options(path=MQTT_WS_PATH)
+        if MQTT_TLS:
+            client.tls_set()
         if MQTT_USERNAME:
             client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
         client.on_connect = self._on_connect
