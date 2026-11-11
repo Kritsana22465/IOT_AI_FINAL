@@ -29,11 +29,15 @@ services:
       REARM_SECONDS: 10
       SENSOR_TIMEOUT_SECONDS: 5
       ARDUINO_API_KEY: ${ARDUINO_API_KEY:-}
-      MQTT_HOST: ${MQTT_HOST:-mqtt.panplay-itgoeasy.xyz}
-      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_HOST: ${MQTT_HOST:-broker.hivemq.com}
+      MQTT_PORT: ${MQTT_PORT:-8884}
+      MQTT_TRANSPORT: ${MQTT_TRANSPORT:-websockets}
+      MQTT_TLS: ${MQTT_TLS:-1}
+      MQTT_WS_PATH: ${MQTT_WS_PATH:-/mqtt}
       MQTT_USERNAME: ${MQTT_USERNAME:-}
       MQTT_PASSWORD: ${MQTT_PASSWORD:-}
       MQTT_QUEUE_TOPIC: ${MQTT_QUEUE_TOPIC:-armbot/cmd/queue}
+      MQTT_ITEMS_TOPIC: ${MQTT_ITEMS_TOPIC:-armbot/items}
       MQTT_EVENT_TOPIC: ${MQTT_EVENT_TOPIC:-armbot/event}
       MQTT_STATUS_TOPIC: ${MQTT_STATUS_TOPIC:-armbot/status}
       MQTT_RECEIVE_TIMEOUT_SECONDS: ${MQTT_RECEIVE_TIMEOUT_SECONDS:-120}

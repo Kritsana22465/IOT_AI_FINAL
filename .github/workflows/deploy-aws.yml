@@ -108,13 +108,27 @@ jobs:
           DOMAIN: ${{ secrets.DOMAIN }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           ARDUINO_API_KEY: ${{ secrets.ARDUINO_API_KEY }}
+          MQTT_HOST: ${{ secrets.MQTT_HOST }}
+          MQTT_PORT: ${{ secrets.MQTT_PORT }}
+          MQTT_TRANSPORT: ${{ secrets.MQTT_TRANSPORT }}
+          MQTT_TLS: ${{ secrets.MQTT_TLS }}
+          MQTT_WS_PATH: ${{ secrets.MQTT_WS_PATH }}
           MQTT_USERNAME: ${{ secrets.MQTT_USERNAME }}
           MQTT_PASSWORD: ${{ secrets.MQTT_PASSWORD }}
         run: |
           set -euo pipefail
           umask 077
-          printf 'POSTGRES_DB=iot_dashboard\nPOSTGRES_USER=iot_user\nPOSTGRES_PASSWORD=%s\nARDUINO_API_KEY=%s\nDOMAIN=%s\nMQTT_USERNAME=%s\nMQTT_PASSWORD=%s\n' \
-            "$POSTGRES_PASSWORD" "$ARDUINO_API_KEY" "$DOMAIN" "$MQTT_USERNAME" "$MQTT_PASSWORD" > runtime.env
+          MQTT_HOST="${MQTT_HOST:-broker.hivemq.com}"
+          MQTT_PORT="${MQTT_PORT:-8884}"
+          MQTT_TRANSPORT="${MQTT_TRANSPORT:-websockets}"
+          MQTT_TLS="${MQTT_TLS:-1}"
+          MQTT_WS_PATH="${MQTT_WS_PATH:-/mqtt}"
+          if [ "$MQTT_HOST" = "broker.hivemq.com" ]; then
+            MQTT_USERNAME=''
+            MQTT_PASSWORD=''
+          fi
+          printf 'POSTGRES_DB=iot_dashboard\nPOSTGRES_USER=iot_user\nPOSTGRES_PASSWORD=%s\nARDUINO_API_KEY=%s\nDOMAIN=%s\nMQTT_HOST=%s\nMQTT_PORT=%s\nMQTT_TRANSPORT=%s\nMQTT_TLS=%s\nMQTT_WS_PATH=%s\nMQTT_USERNAME=%s\nMQTT_PASSWORD=%s\n' \
+            "$POSTGRES_PASSWORD" "$ARDUINO_API_KEY" "$DOMAIN" "$MQTT_HOST" "$MQTT_PORT" "$MQTT_TRANSPORT" "$MQTT_TLS" "$MQTT_WS_PATH" "$MQTT_USERNAME" "$MQTT_PASSWORD" > runtime.env
           scp runtime.env "${AWS_USER}@${AWS_HOST}:/tmp/iot-ai-runtime-${GITHUB_SHA}.env"
           rm -f runtime.env
 

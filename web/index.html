@@ -87,6 +87,24 @@
     .error.visible { display: block; }
     .notice { margin-top: 16px; padding: 12px 14px; color: var(--muted); font-size: 12px; border: 1px solid var(--line); border-radius: 11px; }
     .notice strong { color: var(--amber); }
+    .notice.receiving-completed { color: var(--green); border-color: #34795b; }
+    .notice.receiving-incomplete { color: var(--red); border-color: #713744; }
+    .notice.receiving-in_progress { color: var(--cyan); border-color: #2f6f78; }
+    .mqtt-test-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: stretch; }
+    .mqtt-test-row .notice { margin-top: 16px; }
+    .mqtt-test-button { align-self: stretch; margin-top: 16px; }
+    .mqtt-test-result { display: none; max-height: 330px; margin: 10px 0 0; padding: 12px 14px; overflow: auto; color: var(--text); background: #0b111d; border: 1px solid var(--line); border-radius: 11px; font: 12px/1.55 Consolas, monospace; white-space: pre-wrap; }
+    .mqtt-test-result.visible { display: block; }
+    .item-panel { margin-top: 16px; }
+    .item-list { display: grid; gap: 8px; padding: 14px 20px 18px; }
+    .item-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 12px; background: #0f1726; border: 1px solid var(--line); border-radius: 10px; }
+    .item-row.active { border-color: var(--cyan); background: #102a35; }
+    .item-name { font-weight: 700; }
+    .item-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .item-badge { color: var(--muted); font-size: 12px; text-align: right; white-space: nowrap; }
+    .item-badge.active { color: var(--cyan); }
+    .item-badge.ready { color: var(--green); }
+    .item-empty { color: var(--muted); font-size: 12px; padding: 2px 0; }
     .event-list { display: grid; gap: 10px; padding: 16px 20px 20px; max-height: 350px; overflow-y: auto; }
     .event-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%; padding: 9px; color: var(--text); text-align: left; background: #0f1726; border: 1px solid var(--line); border-radius: 11px; }
     .event-item:hover { border-color: var(--cyan); }
@@ -115,6 +133,8 @@
       .shell { padding: 20px 13px 35px; }
       header { align-items: flex-start; flex-direction: column; }
       .side { grid-template-columns: 1fr; }
+      .mqtt-test-row { grid-template-columns: 1fr; }
+      .mqtt-test-button { margin-top: 0; }
       .cards { gap: 8px; }
       .metric { padding: 12px; }
       .metric-name { font-size: 11px; }
@@ -173,23 +193,27 @@
             <button id="camera-button" onclick="toggleCamera()">ทดสอบกล้อง</button>
           </div>
         </div>
-        <div class="cards">
-          <article class="metric">
-            <div class="metric-name"><span>Banana Pi</span><span class="metric-dot"></span></div>
-            <div class="metric-value" id="count-banana">0</div>
-          </article>
-          <article class="metric">
-            <div class="metric-name"><span>Relay module</span><span class="metric-dot" style="background:#ffbd69"></span></div>
-            <div class="metric-value" id="count-relay">0</div>
-          </article>
-          <article class="metric">
-            <div class="metric-name"><span>Ultrasonic HC-SR04</span><span class="metric-dot" style="background:#72b7ff"></span></div>
-            <div class="metric-value" id="count-ultrasonic">0</div>
-          </article>
+        <div class="mqtt-test-row">
+          <div class="notice" id="receiving-status" aria-live="polite">
+            MQTT: กำลังเชื่อมต่อ
+          </div>
+          <button id="mqtt-test-button" class="secondary mqtt-test-button" onclick="testMqttSubscriptions()">
+            ตรวจสอบ MQTT
+          </button>
         </div>
-        <div class="notice" id="receiving-status" aria-live="polite">
-          MQTT: กำลังเชื่อมต่อ
-        </div>
+        <pre id="mqtt-test-result" class="mqtt-test-result" aria-live="polite"></pre>
+        <section class="panel item-panel">
+          <div class="panel-head">
+            <div>
+              <h2>รายการอุปกรณ์จาก ARMbot</h2>
+              <p class="tiny">ข้อมูลจาก topic <code>armbot/items</code> สำหรับเทียบรายการที่ต้องตรวจ</p>
+            </div>
+            <span class="tiny" id="armbot-item-count">0 รายการ</span>
+          </div>
+          <div id="armbot-item-list" class="item-list" aria-live="polite">
+            <div class="item-empty">กำลังรอรายการจาก ARMbot...</div>
+          </div>
+        </section>
       </section>
 
       <aside class="side">
@@ -277,9 +301,7 @@
     let lastCaptureRequestId = null;
     let captureRetryAt = 0;
     let captureClosing = false;
-    let receivingCameraStartInFlight = false;
     let receivingCameraStopInFlight = false;
-    let receivingRetryAt = 0;
     let errorTimer;
 
     async function request(path, options = {}) {
@@ -345,10 +367,6 @@
             ? "กำลังทดสอบกล้อง ภาพจะไม่ถูกบันทึกลงประวัติ"
             : "เมื่อ IR ตรวจพบอุปกรณ์ ระบบจะเปิดกล้องและบันทึกให้อัตโนมัติ");
       byId("fps").textContent = cameraRunning ? `${camera.fps} FPS` : "-- FPS";
-      const counts = camera.counts || {};
-      byId("count-banana").textContent = counts["Banana Pi"] || 0;
-      byId("count-relay").textContent = counts["Relay module"] || 0;
-      byId("count-ultrasonic").textContent = counts["Ultrasonic HC-SR04"] || 0;
       byId("total-count").textContent = camera.total || 0;
       if (camera.error) showError(camera.error);
     }
@@ -386,8 +404,8 @@
       renderCamera(data.camera);
       renderArduino(data.arduino);
       renderReceiving(data.receiving);
+      renderArmBotItems(data.receiving);
       maybeStopReceivingCamera(data.camera, data.receiving);
-      maybeStartReceivingCapture(data.receiving);
       maybeStartTriggeredCapture(data.arduino, data.receiving);
       const online = data.camera.running || data.arduino.connected
         || data.receiving?.connected;
@@ -397,6 +415,7 @@
 
     function renderReceiving(receiving) {
       const box = byId("receiving-status");
+      box.className = "notice";
       if (!receiving?.connected) {
         box.textContent = `MQTT: ยังไม่เชื่อมต่อ${receiving?.error ? ` · ${receiving.error}` : ""}`;
         return;
@@ -409,7 +428,90 @@
       const progress = Object.entries(job.progress || {})
         .map(([name, count]) => `${name} ${count.detected}/${count.requested}`)
         .join(" · ");
-      box.textContent = `MQTT ${job.job_id}: ${progress} · ${job.message}`;
+      const statusLabel = {
+        waiting_ir: "รอ IR ตรวจพบอุปกรณ์",
+        in_progress: "กำลังตรวจสอบอุปกรณ์",
+        completed: "อุปกรณ์ครบ",
+        incomplete: "อุปกรณ์ไม่ครบ"
+      }[job.status] || job.status;
+      box.classList.add(`receiving-${job.status}`);
+      box.textContent = `สถานะรับอุปกรณ์: ${statusLabel} · ${progress} · ${job.message}`;
+    }
+
+    function renderArmBotItems(receiving) {
+      const list = byId("armbot-item-list");
+      const items = receiving?.items || [];
+      const activeJob = receiving?.job;
+      byId("armbot-item-count").textContent = `${items.length} รายการ`;
+      list.replaceChildren();
+      if (!receiving?.connected) {
+        list.innerHTML = '<div class="item-empty">ยังไม่ได้เชื่อมต่อ MQTT</div>';
+        return;
+      }
+      if (!items.length) {
+        list.innerHTML = '<div class="item-empty">ยังไม่พบรายการจาก ARMbot · รอ topic armbot/items</div>';
+        return;
+      }
+      for (const item of items) {
+        const row = document.createElement("div");
+        const isActive = activeJob?.item_id === item.id
+          && ["waiting_ir", "in_progress"].includes(activeJob.status);
+        row.className = `item-row${isActive ? " active" : ""}`;
+        const details = document.createElement("div");
+        const name = document.createElement("div");
+        name.className = "item-name";
+        name.textContent = item.name_th || item.name || item.id;
+        const meta = document.createElement("div");
+        meta.className = "item-meta";
+        const stock = item.stock === null || item.stock === undefined
+          ? "ไม่ทราบจำนวนคงเหลือ"
+          : `คงเหลือ ${item.stock}`;
+        meta.textContent = `${item.id} · ${stock}`;
+        details.append(name, meta);
+        const badge = document.createElement("div");
+        badge.className = `item-badge${isActive ? " active" : item.yolo_class ? " ready" : ""}`;
+        badge.textContent = isActive
+          ? "อยู่ในคิวตรวจสอบ"
+          : item.yolo_class
+            ? "พร้อมตรวจด้วย AI"
+            : "ยังไม่ผูกกับโมเดล";
+        row.append(details, badge);
+        list.append(row);
+      }
+    }
+
+    function renderMqttTest(result) {
+      const box = byId("mqtt-test-result");
+      const lines = [`ผลการทดสอบ: ${result.message || "ไม่ทราบผล"}`];
+      for (const topic of result.topics || []) {
+        lines.push(
+          "",
+          `Topic: ${topic.topic}`,
+          `Subscribe: ${topic.subscribed ? "สำเร็จ" : "ไม่สำเร็จ"}`,
+          `ได้รับข้อความในช่วงทดสอบ: ${topic.message_received ? "ใช่" : "ไม่พบ"}`,
+          topic.payload
+            ? `Payload:\n${JSON.stringify(topic.payload, null, 2)}`
+            : `หมายเหตุ: ${topic.note || "ยังไม่มี payload"}`
+        );
+      }
+      box.textContent = lines.join("\n");
+      box.classList.add("visible");
+    }
+
+    async function testMqttSubscriptions() {
+      const button = byId("mqtt-test-button");
+      button.disabled = true;
+      button.textContent = "กำลังตรวจสอบ...";
+      try {
+        const result = await request("/api/mqtt/test", { method: "POST" });
+        renderMqttTest(result);
+        await refreshStatus();
+      } catch (error) {
+        showError(`ทดสอบ MQTT ไม่ได้: ${error.message}`);
+      } finally {
+        button.disabled = false;
+        button.textContent = "ตรวจสอบ MQTT";
+      }
     }
 
     async function refreshStatus() {
@@ -418,25 +520,6 @@
       } catch (error) {
         byId("system-status").textContent = "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้";
         showError(error.message);
-      }
-    }
-
-    async function maybeStartReceivingCapture(receiving) {
-      const job = receiving?.job;
-      if (!job || job.status !== "waiting_camera") {
-        return;
-      }
-      if (receivingCameraStartInFlight || Date.now() < receivingRetryAt) return;
-      if (cameraRunning && !cameraTestMode) return;
-      receivingCameraStartInFlight = true;
-      try {
-        if (cameraRunning) await stopBrowserCamera();
-        await startBrowserCamera(null, false, job.job_id);
-      } catch (error) {
-        receivingRetryAt = Date.now() + 5000;
-        showError(`เปิดกล้องสำหรับ MQTT ไม่ได้: ${error.message}`);
-      } finally {
-        receivingCameraStartInFlight = false;
       }
     }
 
@@ -598,7 +681,8 @@
     }
 
     async function maybeStartTriggeredCapture(arduino, receiving) {
-      if (["waiting_camera", "in_progress"].includes(receiving?.job?.status)) return;
+      const job = receiving?.job;
+      if (job && job.status !== "waiting_ir") return;
       const requestId = arduino.capture_request_id;
       if (!arduino.capture_pending || !requestId || requestId === lastCaptureRequestId) return;
       if (captureRequestInFlight || Date.now() < captureRetryAt) return;
@@ -608,7 +692,8 @@
           if (!cameraTestMode) return;
           await stopBrowserCamera();
         }
-        await startBrowserCamera(requestId, true);
+        const receivingJobId = job?.job_id || null;
+        await startBrowserCamera(requestId, receivingJobId ? false : true, receivingJobId);
         await request("/api/capture/ack", {
           method: "POST",
           body: JSON.stringify({ request_id: requestId })

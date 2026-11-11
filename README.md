@@ -50,10 +50,12 @@ const char API_KEY[] = "ค่าเดียวกับ ARDUINO_API_KEY";
 
 ## รับรายการอุปกรณ์ผ่าน MQTT
 
-Dashboard เชื่อมต่อ broker `mqtt.panplay-itgoeasy.xyz:1883` โดย subscribe topic
-`armbot/cmd/queue`, publish event ไปที่ `armbot/event` และ publish retained status
-ไปที่ `armbot/status` สามารถกำหนด `MQTT_HOST`, `MQTT_PORT`, `MQTT_QUEUE_TOPIC`,
-`MQTT_EVENT_TOPIC`, `MQTT_STATUS_TOPIC` และ `MQTT_RECEIVE_TIMEOUT_SECONDS`
+Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ่าน WebSocket + TLS โดยใช้ prefix `armbot` และ subscribe topic
+`armbot/cmd/queue` เพื่อรับคิวหยิบ และ `armbot/items` เพื่อดึงรายการอุปกรณ์จาก ARMbot
+มาแสดงในหน้า Dashboard (รายการนี้เป็น retained message) จากนั้น publish event ไปที่
+`armbot/event` และ publish retained status ไปที่ `armbot/status` สามารถกำหนด
+`MQTT_HOST`, `MQTT_PORT`, `MQTT_QUEUE_TOPIC`, `MQTT_ITEMS_TOPIC`, `MQTT_EVENT_TOPIC`,
+`MQTT_STATUS_TOPIC` และ `MQTT_RECEIVE_TIMEOUT_SECONDS`
 ผ่าน environment variables
 
 ตัวอย่างส่งคำขอ:
@@ -69,19 +71,27 @@ Dashboard เชื่อมต่อ broker `mqtt.panplay-itgoeasy.xyz:1883` �
 รับ `item_id` หรือ `text` โดยรองรับ `relay`, `ultrasonic` และ `bananapi`;
 จำนวนรับได้จาก `count` หรือ `quantity` (ค่าเริ่มต้น 1, สูงสุด 100) และ `source`
 เป็น optional ระบบสร้าง `job_id` ให้หากไม่ส่งมา เมื่อรับคิวจะส่ง event `queued`
-และ status `busy`; ระหว่างตรวจจับจะอัปเดตจำนวนคงเหลือ และเมื่อครบจะส่ง event
-`completed` พร้อม status `ready` หากครบ 120 วินาทียังไม่ครบจะส่ง `incomplete`
-พร้อมจำนวนที่ตรวจพบ งานที่กำลังทำอยู่จะปฏิเสธคำขอใหม่
+และ status `busy`; หลังรับคิวระบบจะอยู่สถานะ `waiting_ir` และยังไม่เปิดกล้อง
+จนกว่า Arduino จะส่ง `object_present: true` เมื่อ IR ตรวจพบของ ระบบจะเปิดกล้อง
+ของ Dashboard นี้เพื่อตรวจนับตามรายการในคิว อัปเดตจำนวนคงเหลือ และเมื่อครบจะส่ง
+event `completed` พร้อม status `ready` หากครบ 120 วินาทียังไม่ครบจะส่ง
+`incomplete` พร้อมจำนวนที่ตรวจพบ งานที่กำลังทำอยู่จะปฏิเสธคำขอใหม่
 
-การตรวจจับใช้กล้องของเบราว์เซอร์: เปิดหน้า Dashboard ค้างไว้ อนุญาตการใช้กล้อง
-และเลือกกล้องให้พร้อมก่อนส่งคำขอ MQTT ระบบเก็บจำนวนสูงสุดที่เห็นพร้อมกันในแต่ละ
-คลาสระหว่างงาน จึงไม่บวกวัตถุชิ้นเดิมซ้ำจากทุกเฟรม และไม่บันทึก event ซ้ำระหว่าง
-การตรวจนับ รูปแบบคำขอ `job_id`/`items` แบบเดิมยังรองรับอยู่ด้วย
+ลำดับการทำงานคือ เพื่อนกดหยิบ → ARMbot วางอุปกรณ์ → IR ตรวจพบ → Dashboard นี้
+เปิดกล้องและตรวจสอบรายการ → แสดงผลว่าครบ/ไม่ครบ → บันทึกรูปผลตรวจและปิดกล้อง
+โดยไม่ต้องแก้ Dashboard ของเพื่อน เปิดหน้า Dashboard ค้างไว้ อนุญาตการใช้กล้อง
+และเลือกกล้องให้พร้อม ระบบเก็บจำนวนสูงสุดที่เห็นพร้อมกันในแต่ละคลาสระหว่างงาน
+จึงไม่บวกวัตถุชิ้นเดิมซ้ำจากทุกเฟรม และแสดงรายการจาก `armbot/items` แยกไว้ให้ดูว่า
+มีอุปกรณ์ใดจาก ARMbot ที่พร้อมตรวจสอบ รูปแบบคำขอ `job_id`/`items` แบบเดิมยังรองรับอยู่ด้วย
+
+ปุ่ม `ตรวจสอบ MQTT` ในหน้า Dashboard จะ subscribe ซ้ำแบบไม่ส่งคำสั่งหยิบไปยัง
+`armbot/cmd/queue` และ `armbot/items` เป็นเวลาไม่กี่วินาที แล้วแสดงผลว่าแต่ละ topic
+subscribe สำเร็จหรือไม่ พร้อม payload ที่ได้รับ ถ้าไม่มีข้อความใหม่ในช่วงทดสอบจะแสดง
+เป็น `ยังไม่มีข้อความใหม่` โดยเฉพาะคิวหยิบซึ่งไม่ได้เป็น retained message
 
 กำหนด `MQTT_USERNAME` และ `MQTT_PASSWORD` เป็น environment variables ในเครื่อง
 หรือเป็น GitHub Actions secrets ชื่อเดียวกันสำหรับ deploy; ไม่ใส่ credential
-ลงใน source code โปรดทราบว่าพอร์ต 1883 ไม่เข้ารหัสการรับส่งข้อมูล หาก broker
-รองรับ TLS ให้ใช้ endpoint/port ที่ broker กำหนด
+ลงใน source code โดยค่าเริ่มต้นใช้ WebSocket + TLS ที่พอร์ต 8884 และ path `/mqtt`
 
 ## Deploy AWS ครั้งแรก
 
@@ -95,7 +105,8 @@ Dashboard เชื่อมต่อ broker `mqtt.panplay-itgoeasy.xyz:1883` �
 - `DOMAIN`: เช่น `12.34.56.78.nip.io` โดยแทนด้วย Elastic IP จริง หรือใช้โดเมนของคุณ
 - `POSTGRES_PASSWORD`: รหัส PostgreSQL ที่ยาวและสุ่ม
 - `ARDUINO_API_KEY`: API key ที่จะใส่ใน Arduino
-- `MQTT_USERNAME` และ `MQTT_PASSWORD`: credential ของ broker (ถ้ากำหนดให้ใช้)
+- `MQTT_HOST`, `MQTT_PORT`, `MQTT_TRANSPORT`, `MQTT_TLS` และ `MQTT_WS_PATH`: ไม่จำเป็น ค่าเริ่มต้นคือ `broker.hivemq.com:8884`, `websockets`, TLS และ `/mqtt`
+- `MQTT_USERNAME` และ `MQTT_PASSWORD`: credential ของ broker ส่วนตัว (ค่าเริ่มต้น HiveMQ ไม่ต้องใช้)
 
 จากนั้น workflow `.github/workflows/deploy-aws.yml` จะทำงานอัตโนมัติ:
 
