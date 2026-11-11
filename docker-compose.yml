@@ -27,7 +27,7 @@ services:
       SNAPSHOT_DIR: /app/data/snapshots
       IMAGE_STORAGE: ${IMAGE_STORAGE:-filesystem}
       REARM_SECONDS: 10
-      SENSOR_TIMEOUT_SECONDS: 5
+      SENSOR_TIMEOUT_SECONDS: 10
       ARDUINO_API_KEY: ${ARDUINO_API_KEY:-}
       MQTT_HOST: ${MQTT_HOST:-broker.hivemq.com}
       MQTT_PORT: ${MQTT_PORT:-8884}

@@ -61,7 +61,7 @@ ITEM_TO_YOLO_CLASS = {
     "ultrasonic": "ultrasonic_hc-sr04",
     "bananapi": "bananapi",
 }
-SENSOR_TIMEOUT_SECONDS = float(os.getenv("SENSOR_TIMEOUT_SECONDS", "5"))
+SENSOR_TIMEOUT_SECONDS = float(os.getenv("SENSOR_TIMEOUT_SECONDS", "10"))
 REARM_SECONDS = float(os.getenv("REARM_SECONDS", "10"))
 ARDUINO_API_KEY = os.getenv("ARDUINO_API_KEY", "").strip()
 MQTT_HOST = os.getenv("MQTT_HOST", "broker.hivemq.com").strip()
