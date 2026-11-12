@@ -54,7 +54,7 @@ Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ�
 `armbot-010eb21b/cmd/queue` เพื่อรับรายการที่กำลังจะหยิบ จากนั้น publish event ไปที่
 `armbot-010eb21b/event` และ publish retained status ไปที่ `armbot-010eb21b/status` สามารถกำหนด
 `MQTT_HOST`, `MQTT_PORT`, `MQTT_QUEUE_TOPIC`, `MQTT_EVENT_TOPIC`,
-`MQTT_STATUS_TOPIC` และ `MQTT_RECEIVE_TIMEOUT_SECONDS`
+`MQTT_STATUS_TOPIC`
 ผ่าน environment variables
 
 ตัวอย่างส่งคำขอ:
@@ -73,9 +73,8 @@ Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ�
 และ status `busy`; หลังรับคิวระบบจะอยู่สถานะ `waiting_ir` และยังไม่เปิดกล้อง
 จนกว่า Arduino จะส่ง `object_present: true` เมื่อ IR ตรวจพบของ ระบบจะเปิดกล้อง
 ของ Dashboard นี้เพื่อตรวจนับตามรายการในคิว อัปเดตจำนวนคงเหลือ และเมื่อครบจะส่ง
-event `completed` พร้อม status `ready` หากภายใน 120 วินาทียังไม่มี IR ตรวจพบ
-อุปกรณ์จะส่ง `incomplete`; เมื่อ IR active แล้วจะยกเลิก timeout และเปิดกล้องค้างไว้
-จนกว่าจะตรวจพบรายการครบ งานที่กำลังทำอยู่จะปฏิเสธคำขอใหม่
+event `completed` พร้อม status `ready` งานจะรอ IR และรออุปกรณ์ให้ครบโดยไม่มี timeout
+งานที่กำลังทำอยู่จะปฏิเสธคำขอใหม่
 
 ลำดับการทำงานคือ เพื่อนกดหยิบ → ARMbot วางอุปกรณ์ → IR ตรวจพบ → Dashboard นี้
 เปิดกล้องและตรวจสอบรายการ → แสดงผลว่าครบ/ไม่ครบ → บันทึกรูปผลตรวจและปิดกล้อง

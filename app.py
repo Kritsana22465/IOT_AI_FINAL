@@ -78,9 +78,6 @@ MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 MQTT_QUEUE_TOPIC = os.getenv("MQTT_QUEUE_TOPIC", "armbot-010eb21b/cmd/queue").strip()
 MQTT_EVENT_TOPIC = os.getenv("MQTT_EVENT_TOPIC", "armbot-010eb21b/event").strip()
 MQTT_STATUS_TOPIC = os.getenv("MQTT_STATUS_TOPIC", "armbot-010eb21b/status").strip()
-MQTT_RECEIVE_TIMEOUT_SECONDS = float(
-    os.getenv("MQTT_RECEIVE_TIMEOUT_SECONDS", "120")
-)
 LOGGER = logging.getLogger(__name__)
 
 
@@ -365,12 +362,10 @@ class MqttReceivingService:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._client: mqtt.Client | None = None
-        self._timer: threading.Timer | None = None
         self._job: dict[str, Any] | None = None
         self._last_messages: dict[str, dict[str, Any]] = {}
         self._test_event: threading.Event | None = None
         self._test_topics_seen: set[str] = set()
-        self._deadline: float | None = None
         self._mqtt_connected = False
         self._mqtt_error: str | None = None
 
@@ -390,8 +385,6 @@ class MqttReceivingService:
             raise RuntimeError("MQTT_TRANSPORT must be tcp or websockets")
         if MQTT_TRANSPORT == "websockets" and not MQTT_WS_PATH.startswith("/"):
             raise RuntimeError("MQTT_WS_PATH must start with /")
-        if MQTT_RECEIVE_TIMEOUT_SECONDS <= 0:
-            raise RuntimeError("MQTT_RECEIVE_TIMEOUT_SECONDS must be positive")
         if bool(MQTT_USERNAME) != bool(MQTT_PASSWORD):
             with self._lock:
                 self._mqtt_error = (
@@ -430,10 +423,6 @@ class MqttReceivingService:
             client.disconnect()
             client.loop_stop()
             self._client = None
-        with self._lock:
-            if self._timer is not None:
-                self._timer.cancel()
-                self._timer = None
 
     def state(self) -> dict[str, Any]:
         with self._lock:
@@ -527,10 +516,6 @@ class MqttReceivingService:
                 raise ValueError("MQTT receiving request is not waiting for IR")
             job["status"] = "in_progress"
             job["message"] = "IR ตรวจพบอุปกรณ์ · เปิดกล้องรอของให้ครบ"
-            self._deadline = None
-            if self._timer is not None:
-                self._timer.cancel()
-                self._timer = None
             job_state = self._job_snapshot_locked()
         self._publish_job_state(job_state, "processing")
 
@@ -560,11 +545,6 @@ class MqttReceivingService:
             if complete:
                 job_state = self._finish_locked("completed", "รับของเรียบร้อย")
                 event_type = "completed"
-            elif self._deadline is not None and time.monotonic() >= self._deadline:
-                job_state = self._finish_locked(
-                    "incomplete", "หมดเวลา รับของไม่ครบ"
-                )
-                event_type = "incomplete"
             elif changed:
                 detected_count = sum(
                     min(job["detected"][name], quantity)
@@ -801,16 +781,6 @@ class MqttReceivingService:
                     "success": False,
                     "message": "รอ IR ตรวจพบอุปกรณ์",
                 }
-                self._deadline = time.monotonic() + MQTT_RECEIVE_TIMEOUT_SECONDS
-                if self._timer is not None:
-                    self._timer.cancel()
-                self._timer = threading.Timer(
-                    MQTT_RECEIVE_TIMEOUT_SECONDS,
-                    self._expire,
-                    args=(request.job_id,),
-                )
-                self._timer.daemon = True
-                self._timer.start()
                 result = self._job_snapshot_locked()
         if not accepted:
             self._publish_event(
@@ -825,27 +795,12 @@ class MqttReceivingService:
             return
         self._publish_job_state(result, event_type)
 
-    def _expire(self, job_id: str) -> None:
-        with self._lock:
-            if (
-                self._job is None
-                or self._job["job_id"] != job_id
-                or self._job["status"] != "waiting_ir"
-            ):
-                return
-            result = self._finish_locked("incomplete", "หมดเวลา รับของไม่ครบ")
-        self._publish_job_state(result, "incomplete")
-
     def _finish_locked(self, status: str, message: str) -> dict[str, Any]:
         if self._job is None:
             raise RuntimeError("No MQTT receiving job is active")
         self._job["status"] = status
         self._job["success"] = status == "completed"
         self._job["message"] = message
-        self._deadline = None
-        if self._timer is not None:
-            self._timer.cancel()
-            self._timer = None
         return self._job_snapshot_locked()
 
     def _job_snapshot_locked(self) -> dict[str, Any] | None:
@@ -898,10 +853,6 @@ class MqttReceivingService:
                     ),
                     None,
                 )
-        if self._deadline is not None:
-            job["remaining_seconds"] = max(
-                0, round(self._deadline - time.monotonic(), 1)
-            )
         return job
 
     def _publish_job_state(

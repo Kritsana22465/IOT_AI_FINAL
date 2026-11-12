@@ -39,7 +39,6 @@ services:
       MQTT_QUEUE_TOPIC: ${MQTT_QUEUE_TOPIC:-armbot-010eb21b/cmd/queue}
       MQTT_EVENT_TOPIC: ${MQTT_EVENT_TOPIC:-armbot-010eb21b/event}
       MQTT_STATUS_TOPIC: ${MQTT_STATUS_TOPIC:-armbot-010eb21b/status}
-      MQTT_RECEIVE_TIMEOUT_SECONDS: ${MQTT_RECEIVE_TIMEOUT_SECONDS:-120}
     ports:
       - "8000:8000"
     volumes:
