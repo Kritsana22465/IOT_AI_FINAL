@@ -765,6 +765,13 @@ class MqttReceivingService:
                     }
                 )
                 return
+        inspection_items = [
+            {
+                "name": name,
+                "requested": quantity,
+            }
+            for name, quantity in requested.items()
+        ]
         accepted = True
         event_type = "queued"
         with self._lock:
@@ -787,6 +794,7 @@ class MqttReceivingService:
                     "job_id": request.job_id,
                     "status": "waiting_ir",
                     "requested": requested,
+                    "inspection_items": inspection_items,
                     "detected": {name: 0 for name in requested},
                     "item_id": item_id,
                     "source": source,
@@ -853,6 +861,17 @@ class MqttReceivingService:
             }
             for name, quantity in self._job["requested"].items()
         }
+        job["inspection_items"] = [
+            {
+                "name": name,
+                "requested": quantity,
+                "detected": min(self._job["detected"][name], quantity),
+                "remaining": max(
+                    0, quantity - self._job["detected"][name]
+                ),
+            }
+            for name, quantity in self._job["requested"].items()
+        ]
         job["count"] = sum(self._job["requested"].values())
         job["detected_count"] = sum(
             min(self._job["detected"][name], quantity)

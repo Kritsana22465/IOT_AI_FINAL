@@ -527,30 +527,31 @@
     function renderRequestedItems(receiving) {
       const list = byId("armbot-item-list");
       const job = receiving?.job;
-      const entries = Object.entries(job?.progress || {});
-      const requestedCount = entries.reduce(
-        (total, [, progress]) => total + Number(progress.requested || 0),
+      const items = job?.inspection_items || Object.entries(job?.progress || {})
+        .map(([name, progress]) => ({ name, ...progress }));
+      const requestedCount = items.reduce(
+        (total, item) => total + Number(item.requested || 0),
         0
       );
       byId("armbot-item-count").textContent = job
         ? `${requestedCount} ชิ้น`
         : "0 รายการ";
       list.replaceChildren();
-      if (!job || !entries.length) {
+      if (!job || !items.length) {
         list.innerHTML = '<div class="item-empty">ยังไม่มีรายการที่จะหยิบ</div>';
         return;
       }
-      for (const [requestedName, progress] of entries) {
+      for (const item of items) {
         const row = document.createElement("div");
         const isActive = ["waiting_ir", "in_progress"].includes(job.status);
         row.className = `item-row${isActive ? " active" : ""}`;
         const details = document.createElement("div");
         const nameElement = document.createElement("div");
         nameElement.className = "item-name";
-        nameElement.textContent = requestedName;
+        nameElement.textContent = item.name;
         const meta = document.createElement("div");
         meta.className = "item-meta";
-        meta.textContent = `${progress.detected}/${progress.requested} ชิ้น`;
+        meta.textContent = `${item.detected || 0}/${item.requested} ชิ้น`;
         details.append(nameElement, meta);
         const badge = document.createElement("div");
         badge.className = `item-badge${isActive ? " active" : ""}`;
