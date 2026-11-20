@@ -1,201 +1,255 @@
 from __future__ import annotations
 
 import argparse
-import re
+import math
 import shutil
 import tempfile
 from pathlib import Path
 
 from ultralytics import YOLO
+from ultralytics.data.utils import check_det_dataset
 
 
 ROOT = Path(__file__).resolve().parent
-DATASET_ROOT = ROOT / "datasetsIOT" / "datasets"
-CLASSES = (
-    ("bananapi", "Banana Pi"),
-    ("relay_module", "Relay module"),
-    ("ultrasonic_hc-sr04", "Ultrasonic HC-SR04"),
+DATASET_ROOT = ROOT / "datasets"
+CLASS_NAMES = (
+    "relay_module",
+    "triple_syringe",
+    "ultrasonic_hc-sr04",
 )
-AUGMENTATION_SUFFIX = re.compile(r"_aug_\d+$")
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
+SPLIT_NAMES = {"train": "train", "val": "val", "test": "test"}
 
 
-def parse_label_file(
-    label_path: Path,
-    expected_class_id: int | None = None,
-    allow_empty: bool = False,
-) -> list[str]:
+def parse_label_file(label_path: Path, class_count: int) -> tuple[list[str], int]:
     normalized_rows = []
+    polygon_count = 0
     for line_number, line in enumerate(
-        label_path.read_text(encoding="utf-8").splitlines(), start=1
+        label_path.read_text(encoding="utf-8-sig").splitlines(), start=1
     ):
         fields = line.split()
         if not fields:
             continue
-        if len(fields) != 5:
+        if len(fields) != 5 and (len(fields) < 7 or len(fields) % 2 == 0):
             raise ValueError(
-                f"{label_path}:{line_number}: expected 5 YOLO fields, got {len(fields)}"
+                f"{label_path}:{line_number}: expected a YOLO box (5 fields) or "
+                f"polygon (class id plus at least 3 coordinate pairs), "
+                f"got {len(fields)} fields"
             )
         try:
-            source_class = float(fields[0])
-            center_x, center_y, width, height = map(float, fields[1:])
+            values = [float(field) for field in fields]
         except ValueError as error:
             raise ValueError(
                 f"{label_path}:{line_number}: label values must be numeric"
             ) from error
-        if not source_class.is_integer() or source_class < 0:
+        if not all(math.isfinite(value) for value in values):
             raise ValueError(
-                f"{label_path}:{line_number}: class id must be a non-negative integer"
+                f"{label_path}:{line_number}: label values must be finite"
             )
-        if expected_class_id is not None and source_class != expected_class_id:
+
+        source_class = values[0]
+        if not source_class.is_integer() or not 0 <= source_class < class_count:
             raise ValueError(
-                f"{label_path}:{line_number}: expected source class "
-                f"{expected_class_id}, got {int(source_class)}"
+                f"{label_path}:{line_number}: class id must be an integer "
+                f"between 0 and {class_count - 1}"
             )
-        if not (
-            0 <= center_x <= 1
-            and 0 <= center_y <= 1
-            and 0 < width <= 1
-            and 0 < height <= 1
-        ):
-            raise ValueError(
-                f"{label_path}:{line_number}: normalized box values are out of range"
-            )
-        tolerance = 1e-5
-        if (
-            center_x - width / 2 < -tolerance
-            or center_y - height / 2 < -tolerance
-            or center_x + width / 2 > 1 + tolerance
-            or center_y + height / 2 > 1 + tolerance
-        ):
-            raise ValueError(
-                f"{label_path}:{line_number}: bounding box extends outside the image"
-            )
-        width = min(width, 2 * center_x, 2 * (1 - center_x))
-        height = min(height, 2 * center_y, 2 * (1 - center_y))
+
+        if len(fields) == 5:
+            center_x, center_y, width, height = values[1:]
+            if not (
+                0 <= center_x <= 1
+                and 0 <= center_y <= 1
+                and 0 < width <= 1
+                and 0 < height <= 1
+            ):
+                raise ValueError(
+                    f"{label_path}:{line_number}: normalized box values are out of range"
+                )
+            tolerance = 1e-5
+            if (
+                center_x - width / 2 < -tolerance
+                or center_y - height / 2 < -tolerance
+                or center_x + width / 2 > 1 + tolerance
+                or center_y + height / 2 > 1 + tolerance
+            ):
+                raise ValueError(
+                    f"{label_path}:{line_number}: bounding box extends outside the image"
+                )
+            width = min(width, 2 * center_x, 2 * (1 - center_x))
+            height = min(height, 2 * center_y, 2 * (1 - center_y))
+        else:
+            coordinates = values[1:]
+            if any(not 0 <= coordinate <= 1 for coordinate in coordinates):
+                raise ValueError(
+                    f"{label_path}:{line_number}: polygon coordinates are out of range"
+                )
+            x_coordinates = coordinates[0::2]
+            y_coordinates = coordinates[1::2]
+            if len(set(zip(x_coordinates, y_coordinates))) < 3:
+                raise ValueError(
+                    f"{label_path}:{line_number}: polygon needs at least "
+                    "three distinct points"
+                )
+            polygon_area = abs(
+                sum(
+                    x_coordinates[index] * y_coordinates[(index + 1) % len(x_coordinates)]
+                    - x_coordinates[(index + 1) % len(x_coordinates)]
+                    * y_coordinates[index]
+                    for index in range(len(x_coordinates))
+                )
+            ) / 2
+            if polygon_area <= 1e-8:
+                raise ValueError(
+                    f"{label_path}:{line_number}: polygon has no area"
+                )
+            left, right = min(x_coordinates), max(x_coordinates)
+            top, bottom = min(y_coordinates), max(y_coordinates)
+            width, height = right - left, bottom - top
+            if width <= 0 or height <= 0:
+                raise ValueError(
+                    f"{label_path}:{line_number}: polygon has no area"
+                )
+            center_x = (left + right) / 2
+            center_y = (top + bottom) / 2
+            polygon_count += 1
+
         normalized_rows.append(
-            f"{{class_id}} {center_x:.6f} {center_y:.6f} {width:.6f} {height:.6f}"
+            f"{int(source_class)} {center_x:.6f} {center_y:.6f} "
+            f"{width:.6f} {height:.6f}"
         )
 
-    if not normalized_rows and not allow_empty:
-        raise ValueError(f"{label_path}: label file has no object annotations")
-    return normalized_rows
+    return normalized_rows, polygon_count
 
 
-def prepare_dataset(source_root: Path, destination: Path) -> dict[str, int]:
-    if not source_root.is_dir():
-        raise FileNotFoundError(f"Dataset directory not found: {source_root}")
+def _image_directories(split_value: str | list[str]) -> list[Path]:
+    values = split_value if isinstance(split_value, list) else [split_value]
+    return [Path(value) for value in values]
+
+
+def _without_suffix(path: Path) -> Path:
+    if not path.suffix:
+        return path
+    return path.parent / path.name[: -len(path.suffix)]
+
+
+def prepare_dataset(source: Path, destination: Path) -> dict[str, int]:
+    data_yaml = source / "data.yaml" if source.is_dir() else source
+    if not data_yaml.is_file():
+        raise FileNotFoundError(f"Dataset YAML not found: {data_yaml}")
+
+    dataset = check_det_dataset(str(data_yaml.resolve()))
+    source_names = dataset["names"]
+    if isinstance(source_names, dict):
+        source_names = [source_names[index] for index in range(len(source_names))]
+    if tuple(source_names) != CLASS_NAMES:
+        raise ValueError(
+            "Dataset class order does not match the application model mapping. "
+            f"Expected {CLASS_NAMES}, got {tuple(source_names)}"
+        )
+
+    if not dataset.get("train") or not dataset.get("val"):
+        raise ValueError("Dataset YAML must define both train and val image splits")
 
     destination.mkdir(parents=True, exist_ok=False)
-    counts = {"train": 0, "val": 0}
-    class_names = [name for _, name in CLASSES]
-
-    for class_id, (folder_name, _) in enumerate(CLASSES):
-        class_root = source_root / folder_name
-        if folder_name == "ultrasonic_hc-sr04":
-            for source_split, split in (("train", "train"), ("valid", "val")):
-                split_root = class_root / source_split
-                image_dir = split_root / "images"
-                label_dir = split_root / "labels"
-                if not image_dir.is_dir() or not label_dir.is_dir():
-                    raise FileNotFoundError(
-                        f"Expected images and labels folders under {split_root}"
-                    )
-                images = sorted(image_dir.glob("*.jpg"))
-                labels = {path.stem: path for path in label_dir.glob("*.txt")}
-                image_stems = {path.stem for path in images}
-                missing_labels = sorted(image_stems - labels.keys())
-                orphan_labels = sorted(labels.keys() - image_stems)
-                if missing_labels or orphan_labels:
-                    raise ValueError(
-                        f"{folder_name}/{source_split}: "
-                        f"missing labels={missing_labels}, "
-                        f"labels without images={orphan_labels}"
-                    )
-                if not images:
-                    raise ValueError(
-                        f"{folder_name}/{source_split}: no .jpg images found"
-                    )
-
-                for image_path in images:
-                    rows = parse_label_file(
-                        labels[image_path.stem],
-                        expected_class_id=0,
-                        allow_empty=True,
-                    )
-                    target_stem = f"{folder_name}_{image_path.stem}"
-                    target_image = (
-                        destination / "images" / split / f"{target_stem}.jpg"
-                    )
-                    target_label = (
-                        destination / "labels" / split / f"{target_stem}.txt"
-                    )
-                    target_image.parent.mkdir(parents=True, exist_ok=True)
-                    target_label.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(image_path, target_image)
-                    target_label.write_text(
-                        "\n".join(row.format(class_id=class_id) for row in rows)
-                        + ("\n" if rows else ""),
-                        encoding="utf-8",
-                    )
-                    counts[split] += 1
-            continue
-
-        image_dir = class_root / "images"
-        label_dir = class_root / "labels"
-        if not image_dir.is_dir() or not label_dir.is_dir():
-            raise FileNotFoundError(
-                f"Expected images and labels folders under {class_root}"
-            )
-
-        images = sorted(image_dir.glob("*.jpg"))
-        labels = {path.stem: path for path in label_dir.glob("*.txt")}
-        image_stems = {path.stem for path in images}
-        missing_labels = sorted(image_stems - labels.keys())
-        orphan_labels = sorted(labels.keys() - image_stems)
-        if missing_labels or orphan_labels:
-            raise ValueError(
-                f"{folder_name}: missing labels={missing_labels}, "
-                f"labels without images={orphan_labels}"
-            )
-        if not images:
-            raise ValueError(f"{folder_name}: no .jpg images found")
-
-        originals = sorted(
-            stem for stem in image_stems if not AUGMENTATION_SUFFIX.search(stem)
-        )
-        if len(originals) < 2:
-            raise ValueError(
-                f"{folder_name}: at least two original image groups are required"
-            )
-        validation_group_count = max(1, round(len(originals) * 0.2))
-        validation_groups = set(originals[-validation_group_count:])
-
-        for image_path in images:
-            group = AUGMENTATION_SUFFIX.sub("", image_path.stem)
-            if group in validation_groups and image_path.stem != group:
+    counts = {"train": 0, "val": 0, "test": 0, "polygons": 0}
+    classes_by_split: dict[str, set[int]] = {}
+    for source_split, target_split in SPLIT_NAMES.items():
+        split_value = dataset.get(source_split)
+        if not split_value:
+            if source_split == "test":
                 continue
-            rows = parse_label_file(labels[image_path.stem])
-            split = "val" if group in validation_groups else "train"
-            target_stem = f"{folder_name}_{image_path.stem}"
-            target_image = destination / "images" / split / f"{target_stem}.jpg"
-            target_label = destination / "labels" / split / f"{target_stem}.txt"
-            target_image.parent.mkdir(parents=True, exist_ok=True)
-            target_label.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(image_path, target_image)
-            target_label.write_text(
-                "\n".join(row.format(class_id=class_id) for row in rows) + "\n",
-                encoding="utf-8",
+            raise ValueError(f"Dataset YAML is missing the {source_split} split")
+
+        for directory_index, image_dir in enumerate(
+            _image_directories(split_value)
+        ):
+            if not image_dir.is_dir():
+                raise FileNotFoundError(
+                    f"{source_split} image directory not found: {image_dir}"
+                )
+            label_dir = image_dir.parent / "labels"
+            if not label_dir.is_dir():
+                raise FileNotFoundError(
+                    f"{source_split} label directory not found: {label_dir}"
+                )
+
+            images = sorted(
+                path
+                for path in image_dir.rglob("*")
+                if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
             )
-            counts[split] += 1
+            image_stems = {
+                _without_suffix(path.relative_to(image_dir)) for path in images
+            }
+            labels = {
+                _without_suffix(path.relative_to(label_dir)): path
+                for path in label_dir.rglob("*.txt")
+            }
+            missing_labels = sorted(image_stems - labels.keys())
+            orphan_labels = sorted(labels.keys() - image_stems)
+            if missing_labels or orphan_labels:
+                raise ValueError(
+                    f"{source_split}: missing labels={missing_labels[:10]}, "
+                    f"labels without images={orphan_labels[:10]}"
+                )
+            if not images:
+                raise ValueError(f"{source_split}: no supported images found")
+
+            split_classes = classes_by_split.setdefault(target_split, set())
+            for image_path in images:
+                relative_image = image_path.relative_to(image_dir)
+                relative_stem = _without_suffix(relative_image)
+                relative_label = relative_stem
+                label_path = labels[relative_label]
+                rows, polygons = parse_label_file(label_path, len(CLASS_NAMES))
+                counts["polygons"] += polygons
+                split_classes.update(int(row.split()[0]) for row in rows)
+
+                if directory_index:
+                    relative_stem = relative_stem.parent / (
+                        f"{directory_index}_{relative_stem.name}"
+                    )
+                target_image = (
+                    destination
+                    / "images"
+                    / target_split
+                    / relative_stem.parent
+                    / f"{relative_stem.name}{image_path.suffix.lower()}"
+                )
+                target_label = (
+                    destination
+                    / "labels"
+                    / target_split
+                    / relative_stem.parent
+                    / f"{relative_stem.name}.txt"
+                )
+                target_image.parent.mkdir(parents=True, exist_ok=True)
+                target_label.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(image_path, target_image)
+                target_label.write_text(
+                    "\n".join(rows) + ("\n" if rows else ""),
+                    encoding="utf-8",
+                )
+                counts[target_split] += 1
+
+    for split in ("train", "val", "test"):
+        if not counts[split]:
+            continue
+        missing_classes = sorted(set(range(len(CLASS_NAMES))) - classes_by_split[split])
+        if missing_classes:
+            missing_names = [CLASS_NAMES[class_id] for class_id in missing_classes]
+            print(f"Warning: {split} split has no annotations for {missing_names}.")
 
     config_lines = [
         f'path: "{destination.as_posix()}"',
         "train: images/train",
         "val: images/val",
-        "names:",
     ]
+    if counts["test"]:
+        config_lines.append("test: images/test")
+    config_lines.append("names:")
     config_lines.extend(
-        f"  {class_id}: {name}" for class_id, name in enumerate(class_names)
+        f"  {class_id}: {name}" for class_id, name in enumerate(CLASS_NAMES)
     )
     (destination / "data.yaml").write_text(
         "\n".join(config_lines) + "\n", encoding="utf-8"
@@ -205,7 +259,10 @@ def prepare_dataset(source_root: Path, destination: Path) -> dict[str, int]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Validate labels, prepare a leakage-safe dataset, and train YOLO."
+        description=(
+            "Validate a YOLO dataset, convert polygon labels to detection boxes, "
+            "train, and evaluate the held-out test split."
+        )
     )
     parser.add_argument("--data", type=Path, default=DATASET_ROOT)
     parser.add_argument("--model", default="yolo11n.pt")
@@ -213,7 +270,7 @@ def main() -> None:
     parser.add_argument("--imgsz", type=int, default=416)
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--device", default=None)
-    parser.add_argument("--name", default="iot-components")
+    parser.add_argument("--name", default="iot-components-v3")
     args = parser.parse_args()
     if args.epochs < 1 or args.imgsz < 1 or args.batch < 1:
         parser.error("--epochs, --imgsz, and --batch must be positive")
@@ -223,14 +280,26 @@ def main() -> None:
         prepared_data = Path(temporary_directory) / "dataset"
         counts = prepare_dataset(args.data.resolve(), prepared_data)
         print(
-            f"Label check passed. Prepared {counts['train']} training images "
-            f"and {counts['val']} validation images."
+            f"Prepared {counts['train']} train, {counts['val']} validation, "
+            f"and {counts['test']} test images; converted "
+            f"{counts['polygons']} polygon annotations to boxes."
         )
-        print("Classes: " + ", ".join(name for _, name in CLASSES))
+        print("Classes: " + ", ".join(CLASS_NAMES))
+        if counts["val"] < len(CLASS_NAMES):
+            print(
+                "Warning: validation has fewer images than classes; "
+                "metrics may not represent every class."
+            )
+        if counts["test"] and counts["test"] < len(CLASS_NAMES):
+            print(
+                "Warning: test has fewer images than classes; "
+                "test metrics will be limited."
+            )
 
+        data_path = str(prepared_data / "data.yaml")
         model = YOLO(args.model)
         model.train(
-            data=str(prepared_data / "data.yaml"),
+            data=data_path,
             epochs=args.epochs,
             imgsz=args.imgsz,
             batch=args.batch,
@@ -242,7 +311,17 @@ def main() -> None:
             name=args.name,
             exist_ok=True,
         )
-    print(f"Training finished. Best weights: {project / args.name / 'weights' / 'best.pt'}")
+
+        best_weights = project / args.name / "weights" / "best.pt"
+        if counts["test"]:
+            if not best_weights.is_file():
+                raise FileNotFoundError(
+                    f"Training did not produce best weights: {best_weights}"
+                )
+            print("Evaluating best checkpoint on the held-out test split.")
+            YOLO(str(best_weights)).val(data=data_path, split="test")
+
+    print(f"Training finished. Best weights: {best_weights}")
 
 
 if __name__ == "__main__":

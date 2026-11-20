@@ -67,7 +67,7 @@ Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ�
 }
 ```
 
-รับ `item_id` หรือ `text` โดยรองรับ `relay`, `ultrasonic` และ `bananapi`;
+รับ `item_id` หรือ `text` โดยรองรับ `relay`, `triple_syringe` และ `ultrasonic`;
 จำนวนรับได้จาก `count` หรือ `quantity` (ค่าเริ่มต้น 1, สูงสุด 100) และ `source`
 เป็น optional ระบบสร้าง `job_id` ให้หากไม่ส่งมา เมื่อรับคิวจะส่ง event `queued`
 และ status `busy`; หลังรับคิวระบบจะอยู่สถานะ `waiting_ir` และยังไม่เปิดกล้อง
@@ -117,17 +117,30 @@ event `completed` พร้อม status `ready` งานจะรอ IR แล
 
 ```powershell
 py -m pip install -r requirements.txt
-py train.py --name iot-components-ultrasonic-v4
+py train.py --name iot-components-v3
 ```
 
-การฝึกจะใช้ `train` และ `valid` split ตาม dataset ultrasonic เวอร์ชันใหม่
-โดยไม่ย้ายภาพจาก `test` มาใช้ฝึกหรือ validation; Banana Pi และ Relay module
-ยังแบ่งชุดตรวจสอบจากภาพต้นฉบับแยกกลุ่มกับภาพ augmentation
+สคริปต์อ่าน `datasets/data.yaml` และใช้ split `train`, `valid` และ `test`
+ตาม dataset ใหม่ ตรวจชื่อคลาส/ID ให้ตรงกับแอป ตรวจคู่ภาพกับ label และแปลง
+polygon annotations เป็นกรอบ bounding box สำหรับ YOLO detection โดยคง class ID
+ตาม YAML (`0: relay_module`, `1: triple_syringe`, `2: ultrasonic_hc-sr04`)
+ชุด `test` จะไม่ถูกใช้ฝึกหรือเลือก checkpoint แต่ใช้ประเมิน best checkpoint หลังฝึก
 
-แอปและ `detect.py` ใช้โมเดล `best.pt` ที่ root ของโปรเจกต์ โดยมีคลาส Banana Pi,
-Relay module และ Ultrasonic HC-SR04 หากฝึกโมเดลใหม่แล้วต้องการใช้ ให้คัดลอกไฟล์
-`runs/object-detection/iot-components-ultrasonic-v4/weights/best.pt` มาทับไฟล์นี้
-หลังตรวจสอบผลการฝึกก่อน build หรือ deploy
+ก่อนใช้ `Unknown` ให้เลือกกล้อง กดเปิดกล้องทดสอบขณะพื้นที่วางของว่าง แล้วกด
+“บันทึกฉากหลังว่าง” ภาพอ้างอิงเก็บไว้ที่ `data/background_reference.jpg`
+และใช้ได้ต่อหลังรีสตาร์ต โดยใช้กล้องตัวเดิมและให้ตำแหน่ง/แสงคงที่ หากเปลี่ยนกล้อง
+มุมกล้องหรือฉากให้บันทึกภาพอ้างอิงใหม่ วัตถุสีหรือรูปร่างที่กลืนกับพื้นหลังอาจตรวจไม่พบ
+และเงาหรือแสงที่เปลี่ยนอาจถูกนับเป็นวัตถุได้ ระบบตัดพื้นที่ที่โมเดลตรวจเป็นสามคลาสหลัก
+ออกจาก foreground ก่อนนับเป็น `Unknown`
+
+ภาพ train ปัจจุบันมีพื้นหลังสีต่างจากฉากขาวอมเทาที่ใช้งานจริง โมเดลสามคลาสหลัก
+อาจตรวจพลาดเมื่อเปลี่ยนฉาก ควรเพิ่มภาพของทั้งสามคลาสที่ถ่ายด้วยกล้องและฉากจริง
+แล้วฝึกใหม่เพื่อให้ผลตรวจตรงกับสภาพใช้งาน
+
+แอปและ `detect.py` ใช้โมเดล `best.pt` ที่ root ของโปรเจกต์ ขณะนี้ไฟล์นี้เป็น checkpoint
+จาก `runs/object-detection/iot-components-v3/weights/best.pt` มีคลาส Relay module,
+Triple syringe และ Ultrasonic HC-SR04 หากฝึกโมเดลใหม่และตรวจสอบผลแล้ว ให้นำ
+`runs/object-detection/<ชื่อ run>/weights/best.pt` มาทับ `best.pt` ก่อน build หรือ deploy
 
 ## หยุดระบบ local
 

@@ -33,6 +33,12 @@ PAGE_PATH = ROOT / "web" / "index.html"
 SNAPSHOT_ROOT = Path(
     os.getenv("SNAPSHOT_DIR", str(ROOT / "data" / "snapshots"))
 ).resolve()
+BACKGROUND_REFERENCE_PATH = Path(
+    os.getenv(
+        "BACKGROUND_REFERENCE_PATH",
+        str(ROOT / "data" / "background_reference.jpg"),
+    )
+).resolve()
 SNAPSHOT_BUCKET = os.getenv("SNAPSHOT_BUCKET", "").strip()
 IMAGE_STORAGE = os.getenv("IMAGE_STORAGE", "filesystem").strip().lower()
 AWS_REGION = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
@@ -47,19 +53,26 @@ if not DATABASE_URL:
         f"postgresql://{database_user}:{database_password}"
         f"@{database_host}:{database_port}/{database_name}"
     )
-CLASS_NAMES = ("Banana Pi", "Relay module", "Ultrasonic HC-SR04")
+CLASS_NAMES = (
+    "Relay module",
+    "Triple syringe",
+    "Ultrasonic HC-SR04",
+    "Unknown",
+)
 MODEL_CLASS_LABELS = {
-    "bananapi": "Banana Pi",
-    "banana pi": "Banana Pi",
     "relay_module": "Relay module",
     "relay module": "Relay module",
+    "triple_syringe": "Triple syringe",
+    "triple syringe": "Triple syringe",
     "ultrasonic_hc-sr04": "Ultrasonic HC-SR04",
     "ultrasonic hc-sr04": "Ultrasonic HC-SR04",
 }
 ITEM_TO_YOLO_CLASS = {
     "relay": "relay_module",
+    "relay_module": "relay_module",
+    "triple_syringe": "triple_syringe",
     "ultrasonic": "ultrasonic_hc-sr04",
-    "bananapi": "bananapi",
+    "ultrasonic_hc-sr04": "ultrasonic_hc-sr04",
 }
 SENSOR_TIMEOUT_SECONDS = float(os.getenv("SENSOR_TIMEOUT_SECONDS", "10"))
 REARM_SECONDS = float(os.getenv("REARM_SECONDS", "10"))
@@ -100,9 +113,9 @@ class CaptureAckRequest(BaseModel):
 
 
 class ReceivingItem(BaseModel):
-    equipment: Literal["bananapi", "relay_module", "ultrasonic_hc-sr04"] = Field(
-        alias="class"
-    )
+    equipment: Literal[
+        "relay_module", "triple_syringe", "ultrasonic_hc-sr04"
+    ] = Field(alias="class")
     quantity: int = Field(ge=1, le=100)
 
 
@@ -920,6 +933,54 @@ class MqttReceivingService:
             LOGGER.error("Could not publish MQTT status: code %s", result.rc)
 
 
+def find_unknown_regions(
+    frame: np.ndarray,
+    background_reference: np.ndarray,
+    known_boxes: list[tuple[int, int, int, int]],
+) -> list[tuple[int, int, int, int]]:
+    reference = cv2.resize(
+        background_reference,
+        (frame.shape[1], frame.shape[0]),
+        interpolation=cv2.INTER_AREA,
+    )
+    frame_lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+    reference_lab = cv2.cvtColor(reference, cv2.COLOR_BGR2LAB)
+    difference = np.max(cv2.absdiff(frame_lab, reference_lab), axis=2)
+    foreground = cv2.GaussianBlur(difference, (5, 5), 0)
+    _, foreground = cv2.threshold(foreground, 8, 255, cv2.THRESH_BINARY)
+    foreground = cv2.morphologyEx(
+        foreground,
+        cv2.MORPH_OPEN,
+        np.ones((3, 3), dtype=np.uint8),
+    )
+    foreground = cv2.morphologyEx(
+        foreground,
+        cv2.MORPH_CLOSE,
+        np.ones((9, 9), dtype=np.uint8),
+    )
+    for x1, y1, x2, y2 in known_boxes:
+        padding = 8
+        cv2.rectangle(
+            foreground,
+            (max(0, x1 - padding), max(0, y1 - padding)),
+            (
+                min(frame.shape[1] - 1, x2 + padding),
+                min(frame.shape[0] - 1, y2 + padding),
+            ),
+            0,
+            thickness=cv2.FILLED,
+        )
+    contours, _ = cv2.findContours(
+        foreground, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+    minimum_area = max(600, int(frame.shape[0] * frame.shape[1] * 0.001))
+    return [
+        cv2.boundingRect(contour)
+        for contour in contours
+        if cv2.contourArea(contour) >= minimum_area
+    ]
+
+
 class CameraService:
     def __init__(
         self, event_store: EventStore, receiving_service: MqttReceivingService
@@ -930,6 +991,16 @@ class CameraService:
         self._worker: threading.Thread | None = None
         self._running = False
         self._model: YOLO | None = None
+        self._background_reference: np.ndarray | None = None
+        if BACKGROUND_REFERENCE_PATH.exists():
+            self._background_reference = cv2.imread(
+                str(BACKGROUND_REFERENCE_PATH), cv2.IMREAD_COLOR
+            )
+            if self._background_reference is None:
+                raise RuntimeError(
+                    "อ่านภาพอ้างอิงฉากหลังไม่ได้: "
+                    f"{BACKGROUND_REFERENCE_PATH}"
+                )
         self._event_store = event_store
         self._receiving_service = receiving_service
         self._jpeg = placeholder_frame("Camera stopped")
@@ -953,6 +1024,7 @@ class CameraService:
             "capture_trigger_id": None,
             "capture_completed": False,
             "receiving_job_id": None,
+            "background_ready": self._background_reference is not None,
         }
 
     def _load_model(self) -> None:
@@ -994,6 +1066,7 @@ class CameraService:
                 "capture_trigger_id": trigger_id,
                 "capture_completed": False,
                 "receiving_job_id": receiving_job_id,
+                "background_ready": self._background_reference is not None,
             }
         )
 
@@ -1011,6 +1084,11 @@ class CameraService:
                 raise ValueError("กล้องกำลังทำงานอยู่แล้ว")
             self._load_model()
             if request.receive_job_id is not None:
+                if self._background_reference is None:
+                    raise ValueError(
+                        "ยังไม่ได้ตั้งภาพอ้างอิงฉากหลัง "
+                        "เปิดกล้องทดสอบขณะฉากว่างและบันทึกฉากหลังก่อน"
+                    )
                 self._receiving_service.attach_camera(request.receive_job_id)
             self._confidence = request.confidence
             self._iou = request.iou
@@ -1076,6 +1154,31 @@ class CameraService:
         with self._lock:
             return self._jpeg
 
+    def set_background_reference(self, content: bytes) -> dict[str, Any]:
+        frame = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if frame is None:
+            raise ValueError("ไฟล์ภาพอ้างอิงฉากหลังไม่ถูกต้อง")
+        with self._lock:
+            if (
+                not self._running
+                or self._state["camera_index"] != "browser"
+                or self._state["receiving_job_id"] is not None
+                or self._record_events
+            ):
+                raise ValueError("ตั้งฉากหลังได้เฉพาะตอนเปิดกล้องทดสอบ")
+            success, encoded = cv2.imencode(".jpg", frame)
+            if not success:
+                raise RuntimeError("เข้ารหัสภาพอ้างอิงฉากหลังไม่สำเร็จ")
+            BACKGROUND_REFERENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            temporary_path = BACKGROUND_REFERENCE_PATH.with_name(
+                f"{BACKGROUND_REFERENCE_PATH.stem}.tmp.jpg"
+            )
+            temporary_path.write_bytes(encoded.tobytes())
+            temporary_path.replace(BACKGROUND_REFERENCE_PATH)
+            self._background_reference = frame
+            self._state["background_ready"] = True
+            return self.state()
+
     def _detect(self, frame: np.ndarray) -> tuple[bytes, dict[str, int], int]:
         model = self._model
         if model is None:
@@ -1086,12 +1189,36 @@ class CameraService:
             )[0]
         annotated = result.plot()
         counts = {name: 0 for name in CLASS_NAMES}
+        known_boxes: list[tuple[int, int, int, int]] = []
         if result.boxes is not None:
-            for class_id in result.boxes.cls.int().tolist():
+            for class_id, box in zip(
+                result.boxes.cls.int().tolist(),
+                result.boxes.xyxy.int().tolist(),
+            ):
                 model_name = result.names[class_id].casefold()
                 name = MODEL_CLASS_LABELS.get(model_name)
                 if name in counts:
                     counts[name] += 1
+                    known_boxes.append(tuple(box))
+        background_reference = self._background_reference
+        if background_reference is not None:
+            for x, y, width, height in find_unknown_regions(
+                frame, background_reference, known_boxes
+            ):
+                counts["Unknown"] += 1
+                cv2.rectangle(
+                    annotated, (x, y), (x + width, y + height), (0, 191, 255), 2
+                )
+                cv2.putText(
+                    annotated,
+                    "Unknown",
+                    (x, max(20, y - 6)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 191, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
         success, encoded = cv2.imencode(
             ".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 82]
         )
@@ -1440,6 +1567,15 @@ async def camera_frame(file: UploadFile = File(...)) -> dict[str, Any]:
         "image": f"data:image/jpeg;base64,{encoded}",
         "camera": camera.state(),
     }
+
+
+@app.post("/api/camera/background-reference")
+async def camera_background_reference(file: UploadFile = File(...)) -> dict[str, Any]:
+    try:
+        content = await file.read()
+        return camera.set_background_reference(content)
+    except (ValueError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @app.get("/api/camera/stream")

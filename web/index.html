@@ -298,6 +298,9 @@
               </select>
             </div>
             <button id="camera-button" class="secondary" onclick="toggleCamera()">เปิดกล้องทดสอบ</button>
+            <button id="background-button" class="secondary" onclick="captureBackgroundReference()" hidden>
+              บันทึกฉากหลังว่าง
+            </button>
             <details class="camera-settings">
               <summary>ตั้งค่าการตรวจจับเพิ่มเติม</summary>
               <div class="camera-settings-grid">
@@ -312,6 +315,9 @@
               </div>
             </details>
           </div>
+          <p class="tiny" id="background-status" style="padding: 0 20px 16px">
+            ตั้งฉากหลังว่างก่อนใช้งาน Unknown
+          </p>
         </div>
         <section class="panel queue-panel">
           <div class="panel-head">
@@ -455,6 +461,14 @@
       byId("camera-button").className = cameraRunning ? "danger" : "secondary";
       byId("camera-button").disabled = false;
       byId("camera-select").disabled = cameraRunning;
+      const backgroundButton = byId("background-button");
+      backgroundButton.hidden = !cameraTestMode;
+      backgroundButton.textContent = camera.background_ready
+        ? "บันทึกฉากหลังใหม่"
+        : "บันทึกฉากหลังว่าง";
+      byId("background-status").textContent = camera.background_ready
+        ? "ฉากหลังอ้างอิงพร้อม · วัตถุที่แยกจากพื้นหลังและไม่ถูกจัดเป็น 3 คลาสจะแสดงเป็น Unknown"
+        : "ยังไม่มีฉากหลังอ้างอิง · เปิดกล้องทดสอบขณะฉากว่างแล้วกดบันทึกฉากหลัง";
       byId("video-frame").classList.toggle("active", cameraRunning);
       if (!cameraRunning) {
         byId("camera-stream").removeAttribute("src");
@@ -473,7 +487,9 @@
           : camera.receiving_job_id
             ? "เปิดกล้องรอจนรายการครบ · จะบันทึกรูปและปิดกล้องเมื่อครบ"
           : cameraTestMode
-            ? "กำลังทดสอบกล้อง ภาพจะไม่ถูกบันทึกลงประวัติ"
+            ? camera.background_ready
+              ? "โหมดทดสอบ · ไม่บันทึกประวัติ · ตรวจวัตถุ Unknown จากภาพอ้างอิงฉากว่าง"
+              : "ฉากว่างอยู่หรือไม่? กดบันทึกฉากหลังเพื่อเริ่มตรวจ Unknown"
             : "เมื่อมีรายการและ IR พบอุปกรณ์ กล้องจะเปิดตรวจให้อัตโนมัติ");
       byId("fps").textContent = cameraRunning ? `${camera.fps} FPS` : "-- FPS";
       const totalCount = byId("total-count");
@@ -627,6 +643,39 @@
         showError(error.message);
       } finally {
         frameInFlight = false;
+      }
+    }
+
+    async function captureBackgroundReference() {
+      if (!cameraRunning || !cameraTestMode) return;
+      if (!window.confirm("ตรวจให้แน่ใจว่าพื้นที่วางของว่าง แล้วบันทึกภาพนี้เป็นฉากหลังอ้างอิง")) {
+        return;
+      }
+      const button = byId("background-button");
+      button.disabled = true;
+      try {
+        const video = byId("camera-preview");
+        if (video.readyState < 2 || !video.videoWidth) {
+          throw new Error("กล้องยังไม่มีภาพพร้อมสำหรับบันทึกฉากหลัง");
+        }
+        const canvas = document.createElement("canvas");
+        const scale = Math.min(1, 960 / video.videoWidth);
+        canvas.width = Math.round(video.videoWidth * scale);
+        canvas.height = Math.round(video.videoHeight * scale);
+        canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+        if (!blob) throw new Error("สร้างภาพอ้างอิงฉากหลังไม่ได้");
+        const form = new FormData();
+        form.append("file", blob, "background-reference.jpg");
+        const camera = await request("/api/camera/background-reference", {
+          method: "POST",
+          body: form
+        });
+        renderCamera(camera);
+      } catch (error) {
+        showError(error.message);
+      } finally {
+        button.disabled = false;
       }
     }
 

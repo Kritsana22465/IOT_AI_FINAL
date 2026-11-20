@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 3
+names: ['relay_module', 'triple_syringe', 'ultrasonic_hc-sr04']
+
+roboflow:
+  workspace: senjimasa
+  project: iot-7c74y
+  version: 1
+  license: Private
+  url: https://app.roboflow.com/senjimasa/iot-7c74y/1
