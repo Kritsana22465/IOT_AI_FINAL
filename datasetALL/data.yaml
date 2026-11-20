@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 28
+names: ['Axis Accelerometer', 'BLUE_LED', 'Buzzer', 'Digit Display', 'ESP32', 'GREEN_LED', 'Hall Sensor', 'IC', 'LED', 'Light Sensor', 'Motor', 'Potentiometer', 'Push Button', 'RED_LED', 'RGB LED', 'Reed Switch', 'Relay', 'Resistor', 'Rotary Encoder', 'Servo motor', 'Sound Sensor', 'Stepper Motor', 'Stepper Motor Board', 'Temperature And Humidity Sensor', 'Touch Sensor', 'USB', 'Ultrasonic Sensor', 'XY Joystick']
+
+roboflow:
+  workspace: yolorpi-iswjs
+  project: yolo-box-ku-oxuhy
+  version: 6
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/yolorpi-iswjs/yolo-box-ku-oxuhy/dataset/6
