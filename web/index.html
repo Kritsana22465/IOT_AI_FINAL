@@ -37,7 +37,7 @@
     .status-pill { border: 1px solid var(--line); border-radius: 999px; padding: 8px 13px; color: var(--muted); font-size: 13px; white-space: nowrap; }
     .status-pill::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--amber); }
     .status-pill.online::before { background: var(--green); box-shadow: 0 0 12px #63e6a588; }
-    .layout { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, .85fr); gap: 18px; align-items: start; }
+    .layout { margin-top: 16px; }
     .panel { background: linear-gradient(145deg, #141e2e, var(--panel)); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; box-shadow: 0 15px 40px #0003; }
     .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
     h2 { font-size: 16px; }
@@ -66,35 +66,21 @@
     .metric-name { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 13px; }
     .metric-value { font-size: 34px; line-height: 1.2; font-weight: 700; margin-top: 12px; }
     .metric-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: var(--cyan); }
-    .side { display: grid; gap: 18px; }
-    .sensor-body, .system-body { padding: 18px 20px 20px; }
-    .sensor-group { padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: #0f1726; }
-    .sensor-group + .sensor-group { margin-top: 12px; }
-    .sensor-group-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-    .sensor-group-title { font-size: 14px; font-weight: 700; }
-    .sensor-group-description { margin-top: 3px; color: var(--muted); font-size: 12px; }
-    .sensor-group .relay-row { margin-top: 11px; padding-top: 11px; }
-    .relay-row { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--line); padding-top: 14px; }
     .presence-state { color: var(--muted); }
     .presence-state.on { color: var(--green); }
     .presence-state.off { color: var(--amber); }
     .presence-state.stale { color: var(--amber); }
     .sensor-health.ready { color: var(--green); }
     .sensor-health.unavailable { color: var(--amber); }
-    .connection-info { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 12px; }
-    .connection-info strong { color: var(--cyan); }
     .error { display: none; padding: 11px 13px; color: #ffd5da; background: #482531; border: 1px solid #713744; border-radius: 10px; font-size: 13px; }
     .error.visible { display: block; }
     .footer { margin-top: 20px; color: #78869c; font-size: 12px; text-align: center; }
     @media (max-width: 850px) {
-      .layout { grid-template-columns: 1fr; }
-      .side { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .camera-controls { grid-template-columns: repeat(2, 1fr); }
     }
     @media (max-width: 560px) {
       .shell { padding: 20px 13px 35px; }
       header { align-items: flex-start; flex-direction: column; }
-      .side { grid-template-columns: 1fr; }
       .cards { gap: 8px; }
       .metric { padding: 12px; }
       .metric-name { font-size: 11px; }
@@ -121,7 +107,7 @@
       color: var(--text);
       font-size: 15px;
     }
-    .shell { max-width: 1180px; padding: 34px 22px 48px; }
+    .shell { max-width: 960px; padding: 34px 22px 48px; }
     header { margin-bottom: 26px; }
     .brand { gap: 12px; }
     .brand-mark {
@@ -135,7 +121,6 @@
     h1 { font-size: 21px; letter-spacing: 0; }
     .subtitle { margin-top: 2px; font-size: 13px; }
     .status-pill { background: #fff; padding: 7px 12px; color: #627084; }
-    .layout { grid-template-columns: minmax(0, 1.45fr) minmax(310px, .82fr); gap: 20px; }
     .panel {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -219,24 +204,30 @@
     .history-nav { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 10px 20px 16px; }
     .history-nav[hidden] { display: none; }
     .history-nav button { font-size: 13px; }
-    .side { gap: 16px; }
-    .sensor-body, .system-body { padding: 16px 18px 18px; }
-    .sensor-group { padding: 15px; background: #fbfcfe; border-color: var(--line); }
-    .sensor-group + .sensor-group { margin-top: 10px; }
-    .sensor-group-title { font-size: 14px; }
-    .sensor-group-description { color: var(--muted); }
+    .camera-sensors {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, .65fr) minmax(0, 1fr);
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-light);
+    }
+    .camera-sensors > div + div { border-inline-start: 1px solid var(--line); padding-inline-start: 16px; }
+    .camera-sensors > div:not(:last-child) { padding-inline-end: 16px; }
+    .sensor-label { font-size: 12px; color: var(--muted); }
+    .sensor-value { display: block; margin-top: 3px; font-size: 14px; }
+    .sensor-connection { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-top: 3px; }
     .presence-state.on { color: var(--green); }
     .presence-state.off, .presence-state.stale { color: var(--amber); }
     .sensor-health.ready { color: var(--green); }
     .sensor-health.unavailable { color: var(--amber); }
-    .connection-info { margin-top: 12px; padding: 10px 11px; border-color: var(--line); }
-    .connection-info strong { color: var(--cyan); }
     @media (max-width: 850px) {
-      .layout { grid-template-columns: 1fr; }
       .camera-controls { grid-template-columns: minmax(0, 1fr) auto; }
     }
     @media (max-width: 560px) {
       .shell { padding: 22px 14px 36px; }
+      .camera-sensors { grid-template-columns: 1fr 1.5fr; gap: 8px 0; padding: 10px 14px; }
+      .camera-sensors .sensor-link { grid-column: 1 / -1; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+      .camera-sensors > .sensor-link + div { border-inline-start: 0; padding-inline-start: 0; }
       .camera-controls { grid-template-columns: 1fr; }
       .camera-controls button { width: 100%; }
       .camera-settings { grid-column: auto; }
@@ -259,15 +250,31 @@
     </header>
 
     <div id="error-box" class="error" role="alert"></div>
-    <div class="layout" style="margin-top: 16px">
-      <section>
-        <div class="panel">
+    <div class="layout">
+        <section class="panel" id="camera-panel" aria-labelledby="camera-title">
           <div class="panel-head">
             <div>
-              <h2>กล้องตรวจจับวัตถุ</h2>
+              <h2 id="camera-title">กล้องตรวจจับวัตถุ</h2>
               <p class="tiny" id="camera-caption">เลือกกล้อง แล้วเริ่มตรวจสอบ</p>
             </div>
             <span class="tiny" id="fps">-- FPS</span>
+          </div>
+          <div class="camera-sensors" role="group" aria-labelledby="sensor-title">
+            <div class="sensor-link">
+              <p class="sensor-label" id="sensor-title">เซนเซอร์แท่นวาง</p>
+              <div class="sensor-connection">
+                <strong class="tiny" id="arduino-dot">● ออฟไลน์</strong>
+                <span class="tiny" id="arduino-caption">กำลังรอการเชื่อมต่อ</span>
+              </div>
+            </div>
+            <div>
+              <p class="sensor-label">IR Sensor</p>
+              <strong id="ir-ready" class="sensor-value sensor-health unavailable">OFF</strong>
+            </div>
+            <div>
+              <p class="sensor-label">สถานะอุปกรณ์</p>
+              <strong id="object-presence" class="sensor-value presence-state" aria-live="polite">ยังไม่มีข้อมูล</strong>
+            </div>
           </div>
           <div class="video-frame" id="video-frame">
             <video id="camera-preview" autoplay muted playsinline></video>
@@ -305,7 +312,7 @@
           <p class="tiny" id="background-status" style="padding: 0 20px 16px">
             ตั้งฉากหลังว่างก่อนใช้งาน Unknown
           </p>
-        </div>
+        </section>
         <section class="panel queue-panel">
           <div class="panel-head">
             <div>
@@ -321,51 +328,6 @@
             <button id="history-older" class="secondary" type="button">คิวเก่ากว่า</button>
           </div>
         </section>
-      </section>
-
-      <aside class="side">
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>เซนเซอร์แท่นวาง</h2>
-              <p class="tiny" id="arduino-caption">กำลังรอการเชื่อมต่อ</p>
-            </div>
-            <span class="tiny" id="arduino-dot">● ออฟไลน์</span>
-          </div>
-          <div class="sensor-body">
-            <div class="sensor-group">
-              <div class="sensor-group-head">
-                <div>
-                  <div class="sensor-group-title">IR Sensor</div>
-                  <p class="sensor-group-description">ตรวจจับอุปกรณ์ที่ถูกนำมาวาง</p>
-                </div>
-                <strong id="ir-ready" class="sensor-health unavailable">OFF</strong>
-              </div>
-              <div class="relay-row">
-                <span>สถานะอุปกรณ์</span>
-                <strong id="object-presence" class="presence-state" aria-live="polite">ยังไม่มีข้อมูล</strong>
-              </div>
-            </div>
-
-            <div class="connection-info"><span>การเชื่อมต่อ</span><strong>Wi-Fi</strong></div>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>วิธีใช้งาน</h2>
-              <p class="tiny">ตรวจรับอุปกรณ์ใน 3 ขั้นตอน</p>
-            </div>
-          </div>
-          <div class="system-body">
-            <div class="relay-row" style="border:0;padding-top:0"><span>1. รับรายการที่จะหยิบ</span><strong>อัตโนมัติ</strong></div>
-            <div class="relay-row"><span>2. IR พบอุปกรณ์</span><strong>เปิดกล้อง</strong></div>
-            <div class="relay-row"><span>3. ตรวจครบแล้ว</span><strong>บันทึกรูป</strong></div>
-          </div>
-        </section>
-
-      </aside>
     </div>
   </main>
   <script>
@@ -476,17 +438,17 @@
       byId("arduino-dot").style.color = arduino.connected ? "var(--green)" : "var(--muted)";
       const irReady = byId("ir-ready");
       irReady.textContent = arduino.ir_ready ? "ON" : "OFF";
-      irReady.className = `sensor-health ${arduino.ir_ready ? "ready" : "unavailable"}`;
+      irReady.className = `sensor-value sensor-health ${arduino.ir_ready ? "ready" : "unavailable"}`;
       const presence = byId("object-presence");
       if (arduino.object_present === null) {
         presence.textContent = "ยังไม่มีข้อมูล";
-        presence.className = "presence-state";
+        presence.className = "sensor-value presence-state";
       } else if (!arduino.ir_ready) {
         presence.textContent = `${arduino.object_present ? "มีอุปกรณ์มาวางแล้ว" : "ยังไม่มีอุปกรณ์"} (ข้อมูลเก่า)`;
-        presence.className = "presence-state stale";
+        presence.className = "sensor-value presence-state stale";
       } else {
         presence.textContent = arduino.object_present ? "มีอุปกรณ์มาวางแล้ว" : "ยังไม่มีอุปกรณ์";
-        presence.className = `presence-state ${arduino.object_present ? "on" : "off"}`;
+        presence.className = `sensor-value presence-state ${arduino.object_present ? "on" : "off"}`;
       }
       const lastSeen = byId("last-seen");
       if (lastSeen) {
