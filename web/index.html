@@ -85,34 +85,6 @@
     .connection-info strong { color: var(--cyan); }
     .error { display: none; padding: 11px 13px; color: #ffd5da; background: #482531; border: 1px solid #713744; border-radius: 10px; font-size: 13px; }
     .error.visible { display: block; }
-    .item-panel { margin-top: 16px; }
-    .item-list { display: grid; gap: 8px; padding: 14px 20px 18px; }
-    .item-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 12px; background: #0f1726; border: 1px solid var(--line); border-radius: 10px; }
-    .item-row.active { border-color: var(--cyan); background: #102a35; }
-    .item-name { font-weight: 700; }
-    .item-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
-    .item-badge { color: var(--muted); font-size: 12px; text-align: right; white-space: nowrap; }
-    .item-badge.active { color: var(--cyan); }
-    .item-badge.ready { color: var(--green); }
-    .item-empty { color: var(--muted); font-size: 12px; padding: 2px 0; }
-    .event-list { display: grid; gap: 10px; padding: 16px 20px 20px; max-height: 350px; overflow-y: auto; }
-    .event-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%; padding: 9px; color: var(--text); text-align: left; background: #0f1726; border: 1px solid var(--line); border-radius: 11px; }
-    .event-item:hover { border-color: var(--cyan); }
-    .event-open { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 11px; align-items: center; width: 100%; min-width: 0; padding: 0; color: var(--text); text-align: left; background: transparent; border: 0; }
-    .event-open:hover { filter: none; }
-    .event-thumb { width: 76px; height: 58px; object-fit: cover; border-radius: 7px; background: #070a10; }
-    .event-time { font-size: 13px; font-weight: 700; }
-    .event-labels { margin-top: 3px; color: var(--muted); font-size: 11px; }
-    .event-delete { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; color: var(--red); background: transparent; border: 1px solid transparent; border-radius: 8px; font-size: 23px; font-weight: 400; line-height: 1; }
-    .event-delete:hover { color: #ffd9dc; background: #472833; border-color: #713744; }
-    .event-empty { color: var(--muted); font-size: 12px; text-align: center; padding: 12px 0; }
-    .modal { display: none; position: fixed; inset: 0; z-index: 10; place-items: center; padding: 22px; background: #0009; }
-    .modal.visible { display: grid; }
-    .modal-card { width: min(760px, 100%); max-height: 90vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 20px 70px #0008; }
-    .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
-    .modal-close { padding: 6px 10px; background: #29374b; color: var(--text); }
-    .modal-card img { display: block; width: 100%; max-height: 65vh; object-fit: contain; background: #070a10; }
-    .modal-meta { padding: 12px 16px 16px; color: var(--muted); font-size: 13px; }
     .footer { margin-top: 20px; color: #78869c; font-size: 12px; text-align: center; }
     @media (max-width: 850px) {
       .layout { grid-template-columns: 1fr; }
@@ -216,14 +188,37 @@
     .camera-settings summary:hover { color: var(--cyan); }
     .camera-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
     .queue-panel { margin-top: 16px; }
-    .queue-body { padding: 0 20px 18px; }
-    .item-panel { margin-top: 16px; }
-    .item-list { padding: 12px 20px 18px; }
-    .item-row { background: #fbfcfe; border-color: var(--line); }
-    .item-row.active { border-color: #75cdd0; background: #effafa; }
-    .item-badge { color: #718096; }
-    .item-badge.active { color: #087d83; }
-    .item-badge.ready { color: var(--green); }
+    .history-list { padding: 0 20px; }
+    .history-empty { color: var(--muted); padding: 18px 0; }
+    .history-entry { border-bottom: 1px solid var(--line); }
+    .history-entry:last-child { border-bottom: 0; }
+    .history-entry summary {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center;
+      gap: 12px; padding: 14px 0; cursor: pointer; list-style: none;
+    }
+    .history-entry summary::-webkit-details-marker { display: none; }
+    .history-entry summary::after { content: "＋"; color: var(--muted); }
+    .history-entry[open] summary::after { content: "−"; }
+    .history-entry summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+    .history-title, .history-time { display: block; overflow-wrap: anywhere; }
+    .history-title { font-weight: 700; }
+    .history-time { margin-top: 3px; }
+    .history-status { font-size: 12px; color: var(--muted); text-align: right; }
+    .history-status.waiting_ir, .history-status.in_progress { color: #087d83; }
+    .history-status.completed { color: var(--green); }
+    .history-status.rejected, .history-status.incomplete, .history-status.interrupted { color: var(--red); }
+    .history-detail { padding: 0 0 16px; }
+    .history-detail ul { margin: 8px 0 12px; padding-inline-start: 22px; }
+    .history-detail .tiny { overflow-wrap: anywhere; }
+    .history-photos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 12px; margin-top: 12px; }
+    .history-photos:empty { display: none; }
+    .history-photos figure { margin: 0; }
+    .history-photos img { display: block; width: 100%; border-radius: 8px; background: #f3f6f9; }
+    .history-photos figcaption { margin-top: 5px; }
+    .history-actions { margin-top: 12px; }
+    .history-nav { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 10px 20px 16px; }
+    .history-nav[hidden] { display: none; }
+    .history-nav button { font-size: 13px; }
     .side { gap: 16px; }
     .sensor-body, .system-body { padding: 16px 18px 18px; }
     .sensor-group { padding: 15px; background: #fbfcfe; border-color: var(--line); }
@@ -236,16 +231,8 @@
     .sensor-health.unavailable { color: var(--amber); }
     .connection-info { margin-top: 12px; padding: 10px 11px; border-color: var(--line); }
     .connection-info strong { color: var(--cyan); }
-    .event-list { padding: 12px 18px 18px; max-height: 390px; }
-    .event-item { background: #fbfcfe; border-color: var(--line); }
-    .event-item:hover { border-color: #75cdd0; }
-    .event-delete { color: #c84d5c; }
-    .event-delete:hover { color: #b83d4b; background: #fff0f1; border-color: #f2cbd0; }
-    .modal { background: rgba(27, 39, 57, .62); }
-    .modal-card { background: #fff; border-color: var(--line); }
-    .modal-close { background: #eef3f7; color: #395064; }
-    .modal-card img { background: #f3f6f9; }
     @media (max-width: 850px) {
+      .layout { grid-template-columns: 1fr; }
       .camera-controls { grid-template-columns: minmax(0, 1fr) auto; }
     }
     @media (max-width: 560px) {
@@ -322,15 +309,16 @@
         <section class="panel queue-panel">
           <div class="panel-head">
             <div>
-              <h2>อุปกรณ์ที่จะตรวจ</h2>
-              <p class="tiny">เมื่อ IR พบอุปกรณ์ กล้องจะเปิดและตรวจให้อัตโนมัติ</p>
+              <h2>ประวัติคิวรับอุปกรณ์</h2>
+              <p class="tiny">กดที่คิวเพื่อดูรายการ รูป และผลตรวจรับ</p>
             </div>
-            <span class="tiny" id="armbot-item-count">0 รายการ</span>
           </div>
-          <div class="queue-body">
-            <div id="armbot-item-list" class="item-list" aria-live="polite">
-              <div class="item-empty">กำลังรอรายการที่จะหยิบ...</div>
-            </div>
+          <div id="history-list" class="history-list">
+            <p class="history-empty">กำลังโหลดประวัติคิว…</p>
+          </div>
+          <div id="history-nav" class="history-nav" hidden>
+            <button id="history-newer" class="secondary" type="button">คิวใหม่กว่า</button>
+            <button id="history-older" class="secondary" type="button">คิวเก่ากว่า</button>
           </div>
         </section>
       </section>
@@ -377,31 +365,9 @@
           </div>
         </section>
 
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>ประวัติการตรวจรับ</h2>
-              <p class="tiny">กดรายการเพื่อดูรูปและเวลา</p>
-            </div>
-            <span class="tiny" id="event-count">0 รายการ</span>
-          </div>
-          <div id="event-list" class="event-list">
-            <div class="event-empty">ยังไม่มีประวัติการตรวจพบ</div>
-          </div>
-        </section>
       </aside>
     </div>
   </main>
-  <div id="event-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="event-modal-title">
-    <div class="modal-card">
-      <div class="modal-head">
-        <h2 id="event-modal-title">รายละเอียดการตรวจพบ</h2>
-        <button class="modal-close" onclick="closeEvent()">ปิด</button>
-      </div>
-      <img id="event-image" alt="รูปอุปกรณ์ที่ตรวจพบ">
-      <div id="event-meta" class="modal-meta"></div>
-    </div>
-  </div>
   <script>
     const byId = (id) => document.getElementById(id);
     let cameraRunning = false;
@@ -416,6 +382,11 @@
     let captureClosing = false;
     let receivingCameraStopInFlight = false;
     let errorTimer;
+    const historyRows = new Map();
+    const newerPages = [];
+    let historyCursor = null;
+    let olderCursor = null;
+    let historyLoading = false;
 
     async function request(path, options = {}) {
       const headers = { ...(options.headers || {}) };
@@ -443,7 +414,7 @@
 
     function labelsText(labels) {
       const entries = Object.entries(labels || {});
-      return entries.length ? entries.map(([name, count]) => `${name} × ${count}`).join(" · ") : "ตรวจพบอุปกรณ์";
+      return entries.length ? entries.map(([name, count]) => `${name} × ${count}`).join(" · ") : "คิวรับอุปกรณ์";
     }
 
     function renderCamera(camera) {
@@ -532,60 +503,11 @@
     function renderStatus(data) {
       renderCamera(data.camera);
       renderArduino(data.arduino);
-      renderRequestedItems(data.receiving);
       maybeStopReceivingCamera(data.camera, data.receiving);
       maybeStartTriggeredCapture(data.arduino, data.receiving);
       const online = data.camera.running || data.arduino.connected;
       byId("system-status").textContent = online ? "ระบบออนไลน์" : "ระบบพร้อมใช้งาน";
       byId("system-status").classList.toggle("online", online);
-    }
-
-    function renderRequestedItems(receiving) {
-      const list = byId("armbot-item-list");
-      const job = receiving?.job;
-      const items = job?.inspection_items || Object.entries(job?.progress || {})
-        .map(([name, progress]) => ({ name, ...progress }));
-      const requestedCount = items.reduce(
-        (total, item) => total + Number(item.requested || 0),
-        0
-      );
-      byId("armbot-item-count").textContent = job
-        ? `${requestedCount} ชิ้น`
-        : "0 รายการ";
-      list.replaceChildren();
-      if (!job || !items.length) {
-        list.innerHTML = '<div class="item-empty">ยังไม่มีรายการที่จะหยิบ</div>';
-        return;
-      }
-      for (const item of items) {
-        const row = document.createElement("div");
-        const isActive = ["waiting_ir", "in_progress"].includes(job.status);
-        row.className = `item-row${isActive ? " active" : ""}`;
-        const details = document.createElement("div");
-        const nameElement = document.createElement("div");
-        nameElement.className = "item-name";
-        nameElement.textContent = item.name;
-        const meta = document.createElement("div");
-        meta.className = "item-meta";
-        const isUnknown = item.name === "Unknown";
-        const references = job.unknown_reference_count || 0;
-        meta.textContent = `${item.detected || 0}/${item.requested} ชิ้น`;
-        if (isUnknown && isActive && references) {
-          meta.textContent += ` · ได้ภาพอ้างอิง ${references} ภาพ`;
-        }
-        details.append(nameElement, meta);
-        const badge = document.createElement("div");
-        badge.className = `item-badge${isActive ? " active" : ""}`;
-        badge.textContent = job.status === "completed"
-          ? "ตรวจครบแล้ว"
-          : job.status === "incomplete"
-            ? "ตรวจไม่ครบ"
-            : job.status === "in_progress"
-              ? (isUnknown && !references ? "รอภาพจาก ARMbot" : "กำลังตรวจ")
-              : "รอ IR";
-        row.append(details, badge);
-        list.append(row);
-      }
     }
 
     async function refreshStatus() {
@@ -642,7 +564,7 @@
           await stopBrowserCamera();
           captureClosing = false;
           await refreshStatus();
-          await refreshEvents();
+          await refreshHistory();
         }
       } catch (error) {
         showError(error.message);
@@ -813,94 +735,174 @@
       }
     }
 
-    async function refreshEvents() {
-      try {
-        const result = await request("/api/events?limit=50");
-        const events = result.events || [];
-        byId("event-count").textContent = `${events.length} รายการ`;
-        const list = byId("event-list");
-        list.replaceChildren();
-        if (!events.length) {
-          list.innerHTML = '<div class="event-empty">ยังไม่มีประวัติการตรวจพบ</div>';
-          return;
+    const queueStatusLabels = {
+      waiting_ir: "รอวางอุปกรณ์",
+      in_progress: "กำลังตรวจ",
+      completed: "ยืนยันรับแล้ว",
+      incomplete: "ตรวจไม่ครบ",
+      rejected: "คิวไม่ถูกเริ่ม",
+      interrupted: "การตรวจถูกขัดจังหวะ"
+    };
+
+    function historyElement(tag, className, value = "") {
+      const element = document.createElement(tag);
+      element.className = className;
+      element.textContent = value;
+      return element;
+    }
+
+    function createHistoryRow(id) {
+      const element = historyElement("details", "history-entry");
+      const summary = document.createElement("summary");
+      const description = document.createElement("span");
+      const title = historyElement("span", "history-title");
+      const time = historyElement("time", "history-time tiny");
+      const status = historyElement("span", "history-status");
+      const detail = historyElement("div", "history-detail");
+      description.append(title, time);
+      summary.append(description, status);
+      element.append(summary, detail);
+      const row = { id, element, title, time, status, detail };
+      element.addEventListener("toggle", () => {
+        if (element.open && row.loadedVersion !== row.version) loadQueueDetail(row);
+      });
+      return row;
+    }
+
+    function renderHistory(queues) {
+      const list = byId("history-list");
+      const ids = new Set(queues.map((queue) => queue.id));
+      for (const [id, row] of historyRows) {
+        if (!ids.has(id)) {
+          row.element.remove();
+          historyRows.delete(id);
         }
-        for (const event of events) {
-          const item = document.createElement("div");
-          item.className = "event-item";
-          const openButton = document.createElement("button");
-          openButton.className = "event-open";
-          openButton.type = "button";
-          openButton.onclick = () => openEvent(event.id);
-          const image = document.createElement("img");
-          image.className = "event-thumb";
-          image.src = `${event.image_url}?v=${event.id}`;
-          image.alt = "รูปอุปกรณ์ที่ตรวจพบ";
-          const details = document.createElement("div");
-          const time = document.createElement("div");
-          time.className = "event-time";
-          time.textContent = formatEventTime(event.detected_at);
-          const labels = document.createElement("div");
-          labels.className = "event-labels";
-          labels.textContent = labelsText(event.labels);
-          details.append(time, labels);
-          openButton.append(image, details);
-          const deleteButton = document.createElement("button");
-          deleteButton.className = "event-delete";
-          deleteButton.type = "button";
-          deleteButton.textContent = "×";
-          deleteButton.title = "ลบรูปและประวัติรายการนี้";
-          deleteButton.setAttribute("aria-label", "ลบรูปและประวัติรายการนี้");
-          deleteButton.onclick = (clickEvent) => {
-            clickEvent.stopPropagation();
-            deleteEvent(event.id, deleteButton);
+      }
+      if (!queues.length) {
+        list.replaceChildren(historyElement("p", "history-empty", "ยังไม่มีประวัติคิวรับอุปกรณ์"));
+        return;
+      }
+      list.querySelector(".history-empty")?.remove();
+      queues.forEach((queue, index) => {
+        const row = historyRows.get(queue.id) || createHistoryRow(queue.id);
+        historyRows.set(queue.id, row);
+        row.version = queue.updated_at;
+        row.title.textContent = labelsText(queue.requested);
+        row.time.dateTime = queue.received_at;
+        const shortCode = queue.job_id.length > 14 ? `${queue.job_id.slice(0, 10)}…` : queue.job_id;
+        row.time.textContent = `${formatEventTime(queue.received_at)} · คิว ${shortCode}`;
+        row.time.title = queue.job_id;
+        row.status.className = `history-status ${queue.status}`;
+        row.status.textContent = queueStatusLabels[queue.status];
+        if (list.children[index] !== row.element) {
+          list.insertBefore(row.element, list.children[index] || null);
+        }
+        if (row.element.open && row.loadedVersion !== row.version) loadQueueDetail(row);
+      });
+    }
+
+    async function refreshHistory(cursor = historyCursor, direction = "") {
+      if (historyLoading) return;
+      historyLoading = true;
+      try {
+        const query = cursor === null ? "" : `?before_id=${cursor}`;
+        const result = await request(`/api/receiving-history${query}`);
+        renderHistory(result.queues);
+        if (direction === "older") newerPages.push(historyCursor);
+        if (direction === "newer") newerPages.pop();
+        historyCursor = cursor;
+        olderCursor = result.next_before_id;
+        byId("history-nav").hidden = !newerPages.length && olderCursor === null;
+        byId("history-newer").disabled = !newerPages.length;
+        byId("history-older").disabled = olderCursor === null;
+      } catch (error) {
+        showError(`โหลดประวัติคิวไม่ได้: ${error.message}`);
+      } finally {
+        historyLoading = false;
+      }
+    }
+
+    function addHistoryPhoto(gallery, url, caption) {
+      const figure = document.createElement("figure");
+      const image = document.createElement("img");
+      image.src = url;
+      image.alt = caption;
+      image.addEventListener("error", () => {
+        image.replaceWith(historyElement("p", "tiny", "เปิดรูปนี้ไม่ได้"));
+      }, { once: true });
+      figure.append(image, historyElement("figcaption", "tiny", caption));
+      gallery.append(figure);
+    }
+
+    async function loadQueueDetail(row) {
+      if (row.loading) return;
+      row.loading = true;
+      if (!row.loadedVersion) {
+        row.detail.replaceChildren(historyElement("p", "tiny", "กำลังโหลดรายละเอียด…"));
+      }
+      try {
+        const queue = await request(`/api/receiving-history/${row.id}`);
+        const identity = historyElement("p", "tiny", `รหัสคิว ${queue.job_id}`);
+        const message = historyElement("p", "tiny", queue.message);
+        const items = document.createElement("ul");
+        for (const [name, quantity] of Object.entries(queue.requested)) {
+          const item = document.createElement("li");
+          item.textContent = `${name} · ตรวจพบ ${queue.detected[name] || 0}/${quantity} ชิ้น`;
+          items.append(item);
+        }
+        const gallery = historyElement("div", "history-photos");
+        queue.pick_images.forEach((url, index) => {
+          addHistoryPhoto(gallery, url, `รูปตอนหยิบจาก ARMbot · ${index + 1}`);
+        });
+        if (queue.inspection_image) {
+          addHistoryPhoto(gallery, queue.inspection_image, `รูปยืนยันการรับ · ${formatEventTime(queue.detected_at)}`);
+        }
+        row.detail.replaceChildren(identity, message);
+        if (items.childElementCount) row.detail.append(items);
+        row.detail.append(gallery);
+        if (!gallery.childElementCount) {
+          row.detail.append(historyElement("p", "tiny", "คิวนี้ยังไม่มีรูป"));
+        }
+        if (queue.event_id !== null) {
+          const remove = historyElement("button", "danger history-actions", "ลบรูปผลตรวจ");
+          remove.type = "button";
+          remove.onclick = async () => {
+            if (!window.confirm("ลบรูปผลตรวจของคิวนี้ใช่ไหม?")) return;
+            remove.disabled = true;
+            try {
+              await request(`/api/events/${queue.event_id}`, { method: "DELETE" });
+              await loadQueueDetail(row);
+              await refreshHistory();
+            } catch (error) {
+              remove.disabled = false;
+              showError(error.message);
+            }
           };
-          item.append(openButton, deleteButton);
-          list.append(item);
+          row.detail.append(remove);
         }
+        row.loadedVersion = queue.updated_at;
       } catch (error) {
-        showError(error.message);
+        row.detail.replaceChildren(historyElement("p", "tiny", `โหลดรายละเอียดไม่ได้: ${error.message}`));
+        row.loadedVersion = null;
+      } finally {
+        row.loading = false;
       }
     }
 
-    async function deleteEvent(eventId, button) {
-      if (!window.confirm("ลบรูปและประวัติรายการนี้ใช่หรือไม่?")) return;
-      button.disabled = true;
-      try {
-        await request(`/api/events/${eventId}`, { method: "DELETE" });
-        closeEvent();
-        await refreshEvents();
-      } catch (error) {
-        button.disabled = false;
-        showError(error.message);
-      }
-    }
-
-    async function openEvent(eventId) {
-      try {
-        const event = await request(`/api/events/${eventId}`);
-        byId("event-image").src = `${event.image_url}?v=${event.id}`;
-        byId("event-meta").textContent = `${formatEventTime(event.detected_at)} · ${labelsText(event.labels)}`;
-        byId("event-modal").classList.add("visible");
-      } catch (error) {
-        showError(error.message);
-      }
-    }
-
-    function closeEvent() {
-      byId("event-modal").classList.remove("visible");
-    }
-
-    byId("event-modal").addEventListener("click", (event) => {
-      if (event.target === byId("event-modal")) closeEvent();
+    byId("history-older").addEventListener("click", () => {
+      if (olderCursor !== null) refreshHistory(olderCursor, "older");
+    });
+    byId("history-newer").addEventListener("click", () => {
+      if (newerPages.length) refreshHistory(newerPages.at(-1), "newer");
     });
     byId("camera-select").addEventListener("change", (event) => {
       selectedCameraId = event.target.value;
     });
     refreshCameraList();
     refreshStatus();
-    refreshEvents();
+    refreshHistory();
     setInterval(refreshStatus, 1000);
-    setInterval(refreshEvents, 5000);
+    setInterval(refreshHistory, 5000);
   </script>
 </body>
 </html>
