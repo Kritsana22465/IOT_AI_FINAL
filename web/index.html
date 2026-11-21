@@ -43,10 +43,9 @@
     h2 { font-size: 16px; }
     .tiny { color: var(--muted); font-size: 12px; }
     .video-frame { position: relative; min-height: 310px; aspect-ratio: 16/9; background: #070a10; display: grid; place-items: center; overflow: hidden; }
-    .video-frame video, .video-frame img { width: 100%; height: 100%; position: absolute; inset: 0; object-fit: contain; }
-    .video-frame img { display: none; }
-    .video-frame.has-result img { display: block; }
-    .video-frame.has-result video { opacity: 0; }
+    .video-frame video, .video-frame canvas { width: 100%; height: 100%; position: absolute; inset: 0; object-fit: contain; }
+    .video-frame canvas { pointer-events: none; }
+    .video-frame canvas[hidden] { display: none; }
     .video-empty { position: relative; z-index: 1; padding: 24px; text-align: center; color: var(--muted); pointer-events: none; }
     .video-empty .camera-icon { font-size: 34px; margin-bottom: 8px; }
     .video-frame.active .video-empty { display: none; }
@@ -285,7 +284,7 @@
           </div>
           <div class="video-frame" id="video-frame">
             <video id="camera-preview" autoplay muted playsinline></video>
-            <img id="camera-stream" alt="ภาพจากกล้องพร้อมกรอบตรวจจับ">
+            <canvas id="camera-overlay" aria-hidden="true" hidden></canvas>
             <div class="video-empty">
               <div class="camera-icon">▣</div>
               <div id="video-message">เมื่อมีรายการและ IR พบอุปกรณ์ กล้องจะเปิดตรวจให้อัตโนมัติ</div>
@@ -360,6 +359,9 @@
     let historyCursor = null;
     let olderCursor = null;
     let historyLoading = false;
+    let statusLoading = false;
+    let currentHistoryRevision;
+    let renderedHistoryRevision;
 
     async function request(path, options = {}) {
       const headers = { ...(options.headers || {}) };
@@ -419,8 +421,7 @@
         : "ยังไม่มีฉากหลังอ้างอิง · เปิดกล้องทดสอบขณะฉากว่างแล้วกดบันทึกฉากหลัง";
       byId("video-frame").classList.toggle("active", cameraRunning);
       if (!cameraRunning) {
-        byId("camera-stream").removeAttribute("src");
-        byId("video-frame").classList.remove("has-result");
+        byId("camera-overlay").hidden = true;
       }
       byId("camera-caption").textContent = cameraRunning
         ? (camera.receiving_job_id
@@ -486,6 +487,10 @@
       const online = data.camera.running || data.arduino.connected;
       byId("system-status").textContent = online ? "ระบบออนไลน์" : "ระบบพร้อมใช้งาน";
       byId("system-status").classList.toggle("online", online);
+      currentHistoryRevision = data.history_revision;
+      if (!document.hidden && renderedHistoryRevision !== currentHistoryRevision) {
+        refreshHistory();
+      }
     }
 
     function renderActiveQueue(job, arduino, camera) {
@@ -535,17 +540,48 @@
         cancelInFlight = false;
         button.disabled = false;
         await refreshStatus();
-        await refreshHistory();
       }
     }
 
     async function refreshStatus() {
+      if (statusLoading) return;
+      statusLoading = true;
       try {
         renderStatus(await request("/api/status"));
       } catch (error) {
         byId("system-status").textContent = "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้";
         showError(error.message);
+      } finally {
+        statusLoading = false;
       }
+    }
+
+    function drawCameraOverlay({ width, height, boxes }) {
+      const overlay = byId("camera-overlay");
+      if (overlay.width !== width) overlay.width = width;
+      if (overlay.height !== height) overlay.height = height;
+      const context = overlay.getContext("2d");
+      context.clearRect(0, 0, width, height);
+      const fontSize = Math.max(13, Math.round(width / 55));
+      context.font = `600 ${fontSize}px sans-serif`;
+      context.textBaseline = "top";
+      context.lineWidth = Math.max(2, width / 400);
+      for (const box of boxes) {
+        const color = box.confidence === null ? "#ffc646" : "#61e3a3";
+        const label = box.confidence === null
+          ? box.label
+          : `${box.label} ${Math.round(box.confidence * 100)}%`;
+        context.strokeStyle = color;
+        context.fillStyle = color;
+        context.strokeRect(box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1);
+        const labelWidth = Math.min(width, context.measureText(label).width + 10);
+        const x = Math.max(0, Math.min(width - labelWidth, box.x1));
+        const y = Math.max(0, box.y1 - fontSize - 6);
+        context.fillRect(x, y, labelWidth, fontSize + 6);
+        context.fillStyle = "#111827";
+        context.fillText(label, x + 5, y + 3, labelWidth - 10);
+      }
+      overlay.hidden = !boxes.length;
     }
 
     async function maybeStopReceivingCamera(camera, receiving) {
@@ -584,19 +620,18 @@
         const form = new FormData();
         form.append("file", blob, "camera.jpg");
         if (browserSessionId !== sessionId) return;
-        const response = await fetch(`/api/camera/frame?session_id=${sessionId}`, { method: "POST", body: form });
+        const response = await fetch(`/api/camera/frame?session_id=${sessionId}&preview=false`, { method: "POST", body: form });
+        if (response.status === 429) return;
         const payload = await response.json();
         if (browserSessionId !== sessionId) return;
         if (!response.ok) throw new Error(payload.detail || "ส่งภาพไปประมวลผลไม่ได้");
-        byId("camera-stream").src = payload.image;
-        byId("video-frame").classList.add("has-result");
         renderCamera(payload.camera);
+        if (browserSessionId === sessionId) drawCameraOverlay(payload);
         if (payload.camera.capture_completed && !captureClosing) {
           captureClosing = true;
           try {
             await stopBrowserCamera();
             await refreshStatus();
-            await refreshHistory();
           } finally {
             captureClosing = false;
           }
@@ -743,6 +778,7 @@
       browserStream = null;
       browserSessionId = null;
       byId("camera-preview").srcObject = null;
+      byId("camera-overlay").hidden = true;
       cameraRunning = false;
       cameraTestMode = false;
     }
@@ -865,10 +901,12 @@
     async function refreshHistory(cursor = historyCursor, direction = "") {
       if (historyLoading) return;
       historyLoading = true;
+      const requestedRevision = currentHistoryRevision;
       try {
         const query = cursor === null ? "" : `?before_id=${cursor}`;
         const result = await request(`/api/receiving-history${query}`);
         renderHistory(result.queues);
+        renderedHistoryRevision = requestedRevision;
         if (direction === "older") newerPages.push(historyCursor);
         if (direction === "newer") newerPages.pop();
         historyCursor = cursor;
@@ -933,7 +971,7 @@
             try {
               await request(`/api/events/${queue.event_id}`, { method: "DELETE" });
               await loadQueueDetail(row);
-              await refreshHistory();
+              await refreshStatus();
             } catch (error) {
               remove.disabled = false;
               showError(error.message);
@@ -962,9 +1000,10 @@
     });
     refreshCameraList();
     refreshStatus();
-    refreshHistory();
     setInterval(refreshStatus, 1000);
-    setInterval(refreshHistory, 5000);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) refreshStatus();
+    });
   </script>
 </body>
 </html>

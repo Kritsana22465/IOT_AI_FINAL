@@ -10,7 +10,9 @@ import threading
 import time
 import uuid
 from contextlib import asynccontextmanager, contextmanager
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from functools import cached_property
 from pathlib import Path
 from typing import Any, Callable, Iterator, Literal
 from urllib.parse import quote
@@ -21,6 +23,7 @@ import numpy as np
 import paho.mqtt.client as mqtt
 import psycopg
 from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
@@ -151,6 +154,7 @@ class EventStore:
         self.snapshot_root = snapshot_root
         self.snapshot_bucket = snapshot_bucket
         self.database_images = IMAGE_STORAGE == "database"
+        self.history_revision = uuid.uuid4().hex
         self._s3 = (
             boto3.client("s3", region_name=aws_region) if snapshot_bucket else None
         )
@@ -319,6 +323,8 @@ class EventStore:
             if not self.database_images:
                 self._delete_image(relative_path)
             raise
+        if queue_id is not None:
+            self.history_revision = uuid.uuid4().hex
         return self._payload(row)
 
     def add_queue(self, job: dict[str, Any]) -> int:
@@ -335,7 +341,8 @@ class EventStore:
                     Json(job["requested"]), Json(job["detected"]), job["message"],
                 ),
             ).fetchone()
-            return row["id"]
+        self.history_revision = uuid.uuid4().hex
+        return row["id"]
 
     def update_queue(self, job: dict[str, Any]) -> None:
         with self.connection() as connection:
@@ -351,6 +358,7 @@ class EventStore:
                     job["message"], job.get("armbot_job_id"), job["history_id"],
                 ),
             )
+        self.history_revision = uuid.uuid4().hex
 
     def save_pick_images(self, queue_id: int, images: list[tuple[float, bytes]]) -> None:
         if not images:
@@ -365,11 +373,14 @@ class EventStore:
                     """,
                     [(queue_id, captured_at, image) for captured_at, image in images],
                 )
-                if cursor.rowcount:
+                added = cursor.rowcount > 0
+                if added:
                     connection.execute(
                         "UPDATE receiving_history SET updated_at = NOW() WHERE id = %s",
                         (queue_id,),
                     )
+        if added:
+            self.history_revision = uuid.uuid4().hex
 
     def list_queues(self, limit: int, before_id: int | None) -> list[dict[str, Any]]:
         with self.connection() as connection:
@@ -490,6 +501,7 @@ class EventStore:
             )
             connection.commit()
 
+        self.history_revision = uuid.uuid4().hex
         if row["image_data"] is None:
             self._delete_image(row["image_path"])
         return True
@@ -1384,6 +1396,41 @@ def find_unknown_regions(
     ]
 
 
+@dataclass(frozen=True)
+class DetectionBox:
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+    label: str
+    confidence: float | None = None
+
+
+@dataclass(frozen=True)
+class CameraFrameResult:
+    frame: np.ndarray
+    boxes: list[DetectionBox]
+    counts: dict[str, int]
+
+    @cached_property
+    def jpeg(self) -> bytes:
+        annotated = self.frame.copy()
+        for box in self.boxes:
+            label = box.label
+            color = (0, 191, 255) if box.confidence is None else (120, 220, 52)
+            if box.confidence is not None:
+                label = f"{label} {box.confidence:.2f}"
+            cv2.rectangle(annotated, (box.x1, box.y1), (box.x2, box.y2), color, 2)
+            cv2.putText(
+                annotated, label, (box.x1, max(20, box.y1 - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA,
+            )
+        success, encoded = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 82])
+        if not success:
+            raise RuntimeError("แปลงภาพจากกล้องเป็น JPEG ไม่สำเร็จ")
+        return encoded.tobytes()
+
+
 class CameraService:
     def __init__(
         self, event_store: EventStore, receiving_service: MqttReceivingService
@@ -1407,6 +1454,7 @@ class CameraService:
         self._event_store = event_store
         self._receiving_service = receiving_service
         self._jpeg = placeholder_frame("Camera stopped")
+        self._preview: CameraFrameResult | None = None
         self._confidence = 0.5
         self._iou = 0.25
         self._last_frame_time: float | None = None
@@ -1455,6 +1503,7 @@ class CameraService:
         self._event_saved = False
         self._frames_processed = 0
         self._record_events = record_events
+        self._preview = None
         self._state.update(
             {
                 "running": camera_index is not None,
@@ -1574,7 +1623,9 @@ class CameraService:
 
     def latest_jpeg(self) -> bytes:
         with self._lock:
-            return self._jpeg
+            preview = self._preview
+            placeholder = self._jpeg
+        return preview.jpeg if preview is not None else placeholder
 
     def set_background_reference(self, content: bytes) -> dict[str, Any]:
         frame = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
@@ -1601,7 +1652,7 @@ class CameraService:
             self._state["background_ready"] = True
             return self.state()
 
-    def _detect(self, frame: np.ndarray) -> tuple[bytes, dict[str, int], int]:
+    def _detect(self, frame: np.ndarray) -> CameraFrameResult:
         model = self._model
         if model is None:
             raise RuntimeError("โมเดลยังไม่พร้อมใช้งาน")
@@ -1609,19 +1660,21 @@ class CameraService:
             result = model.predict(
                 frame, conf=self._confidence, iou=self._iou, verbose=False
             )[0]
-        annotated = result.plot()
         counts = {name: 0 for name in CLASS_NAMES}
+        detections: list[DetectionBox] = []
         known_boxes: list[tuple[int, int, int, int]] = []
         if result.boxes is not None:
-            for class_id, box in zip(
+            for class_id, box, confidence in zip(
                 result.boxes.cls.int().tolist(),
                 result.boxes.xyxy.int().tolist(),
+                result.boxes.conf.tolist(),
             ):
                 model_name = result.names[class_id].casefold()
                 name = MODEL_CLASS_LABELS.get(model_name)
                 if name in counts and name != UNKNOWN_LABEL:
                     counts[name] += 1
                     known_boxes.append(tuple(box))
+                    detections.append(DetectionBox(*box, name, round(float(confidence), 3)))
         with self._lock:
             receiving_job_id = self._state["receiving_job_id"]
         background_reference = self._background_reference
@@ -1647,30 +1700,15 @@ class CameraService:
                     label = "Unknown match"
             counts[UNKNOWN_LABEL] = len(boxes_to_draw)
             for x, y, width, height in boxes_to_draw:
-                cv2.rectangle(
-                    annotated, (x, y), (x + width, y + height), (0, 191, 255), 2
-                )
-                cv2.putText(
-                    annotated,
-                    label,
-                    (x, max(20, y - 6)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 191, 255),
-                    2,
-                    cv2.LINE_AA,
-                )
-        success, encoded = cv2.imencode(
-            ".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 82]
-        )
-        if not success:
-            raise RuntimeError("แปลงภาพจากกล้องเป็น JPEG ไม่สำเร็จ")
-        return encoded.tobytes(), counts, sum(counts.values())
+                detections.append(DetectionBox(x, y, x + width, y + height, label))
+        return CameraFrameResult(frame, detections, counts)
 
-    def _publish(self, jpeg: bytes, counts: dict[str, int], total: int) -> None:
+    def _publish(self, result: CameraFrameResult) -> None:
+        counts = result.counts
+        total = sum(counts.values())
         event_to_save = self._record_events and total > 0
         with self._lock:
-            self._jpeg = jpeg
+            self._preview = result
             self._state.update(
                 {
                     "running": self._running,
@@ -1692,7 +1730,7 @@ class CameraService:
             if receiving_job_id is not None and self._running and not self._event_saved:
                 def save_inspection(labels: dict[str, int], queue_id: int) -> None:
                     event = self._event_store.create(
-                        jpeg, labels, sum(labels.values()), queue_id=queue_id
+                        result.jpeg, labels, sum(labels.values()), queue_id=queue_id
                     )
                     self._event_saved = True
                     self._state["last_event_id"] = event["id"]
@@ -1708,7 +1746,7 @@ class CameraService:
         if event_to_save:
             labels = {name: count for name, count in counts.items() if count}
             try:
-                event = self._event_store.create(jpeg, labels, total)
+                event = self._event_store.create(result.jpeg, labels, total)
                 with self._lock:
                     self._state["last_event_id"] = event["id"]
                     self._state["last_event_at"] = event["detected_at"]
@@ -1718,7 +1756,9 @@ class CameraService:
                     self._event_saved = False
                     self._state["error"] = f"บันทึกรูปเหตุการณ์ไม่ได้: {error}"
 
-    def process_uploaded_frame(self, content: bytes, session_id: str | None = None) -> bytes:
+    def process_uploaded_frame(
+        self, content: bytes, session_id: str | None = None, preview: bool = True
+    ) -> dict[str, Any]:
         with self._lock:
             if not self._running:
                 raise RuntimeError("กรุณาเริ่มกล้องก่อนส่งภาพ")
@@ -1729,7 +1769,7 @@ class CameraService:
         if frame is None:
             raise ValueError("ไฟล์ภาพจากกล้องไม่ถูกต้อง")
         started = time.perf_counter()
-        jpeg, counts, total = self._detect(frame)
+        result = self._detect(frame)
         with self._lock:
             if self._state["session_id"] != active_session:
                 raise ValueError("รอบการตรวจด้วยกล้องจบแล้ว")
@@ -1737,9 +1777,20 @@ class CameraService:
             now = time.perf_counter()
             fps = 1 / max(now - (self._last_frame_time or started), 1e-6)
             self._last_frame_time = now
-            self._publish(jpeg, counts, total)
+            self._publish(result)
             self._state["fps"] = round(fps, 1)
-        return jpeg
+            camera_state = self.state()
+        height, width = frame.shape[:2]
+        payload: dict[str, Any] = {
+            "camera": camera_state,
+            "width": width,
+            "height": height,
+            "boxes": [asdict(box) for box in result.boxes],
+        }
+        if preview:
+            encoded = base64.b64encode(result.jpeg).decode("ascii")
+            payload["image"] = f"data:image/jpeg;base64,{encoded}"
+        return payload
 
     def _process_local_frames(self, capture: cv2.VideoCapture) -> None:
         try:
@@ -1751,13 +1802,13 @@ class CameraService:
                 if not success:
                     raise RuntimeError("อ่านภาพจากกล้องไม่สำเร็จ")
                 started = time.perf_counter()
-                jpeg, counts, total = self._detect(frame)
+                result = self._detect(frame)
                 with self._lock:
                     self._frames_processed += 1
                 now = time.perf_counter()
                 fps = 1 / max(now - (self._last_frame_time or started), 1e-6)
                 self._last_frame_time = now
-                self._publish(jpeg, counts, total)
+                self._publish(result)
                 with self._lock:
                     self._state["fps"] = round(fps, 1)
         except Exception as error:
@@ -1917,6 +1968,7 @@ event_store = EventStore(
 receiving = MqttReceivingService(event_store)
 camera = CameraService(event_store, receiving)
 arduino = ArduinoWifi(event_store)
+browser_frame_gate = threading.Lock()
 
 
 @asynccontextmanager
@@ -1951,11 +2003,13 @@ def dashboard() -> FileResponse:
 
 
 @app.get("/api/status")
-def status() -> dict[str, Any]:
+def status(response: Response) -> dict[str, Any]:
+    response.headers["Cache-Control"] = "no-store"
     return {
         "camera": camera.state(),
         "arduino": arduino.state(),
         "receiving": receiving.state(),
+        "history_revision": event_store.history_revision,
     }
 
 
@@ -1985,17 +2039,18 @@ def stop_camera(session_id: str | None = Query(default=None, max_length=100)) ->
 async def camera_frame(
     file: UploadFile = File(...),
     session_id: str | None = Query(default=None, max_length=100),
+    # Older browser tabs still use the server-rendered preview.
+    preview: bool = Query(default=True),
 ) -> dict[str, Any]:
+    if not browser_frame_gate.acquire(blocking=False):
+        raise HTTPException(status_code=429, detail="กำลังประมวลผลเฟรมก่อนหน้า")
     try:
         content = await file.read()
-        jpeg = camera.process_uploaded_frame(content, session_id)
+        return await run_in_threadpool(camera.process_uploaded_frame, content, session_id, preview)
     except (ValueError, RuntimeError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    encoded = base64.b64encode(jpeg).decode("ascii")
-    return {
-        "image": f"data:image/jpeg;base64,{encoded}",
-        "camera": camera.state(),
-    }
+    finally:
+        browser_frame_gate.release()
 
 
 @app.post("/api/camera/background-reference")
