@@ -123,6 +123,10 @@ class CaptureAckRequest(BaseModel):
     request_id: str = Field(min_length=1, max_length=100)
 
 
+class CancelQueueRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=200, pattern=r"\S")
+
+
 class ReceivingItem(BaseModel):
     equipment: Literal[
         "relay_module", "triple_syringe", "ultrasonic_hc-sr04", "unknown"
@@ -777,6 +781,27 @@ class MqttReceivingService:
             result = self._job_snapshot_locked()
         self._publish_job_state(result, "incomplete")
 
+    def cancel_queue(self, history_id: int, reason: str) -> dict[str, Any]:
+        with self._lock:
+            job = self._job
+            if (
+                job is None
+                or job["history_id"] != history_id
+                or job["status"] not in ("waiting_ir", "in_progress")
+            ):
+                raise ValueError("คิวนี้ไม่ได้อยู่ระหว่างรอหรือกำลังตรวจ")
+            updated = {
+                **job,
+                "status": "cancelled",
+                "message": f"ยกเลิกการตรวจรับ: {reason}",
+                "success": False,
+            }
+            self._event_store.update_queue(updated)
+            job.update(updated)
+            result = self._job_snapshot_locked()
+            self._publish_job_state(result, "cancelled")
+            return result
+
     def _on_connect(
         self,
         client: mqtt.Client,
@@ -1390,6 +1415,7 @@ class CameraService:
         self._record_events = True
         self._state: dict[str, Any] = {
             "running": False,
+            "session_id": None,
             "camera_index": None,
             "record_events": True,
             "counts": {name: 0 for name in CLASS_NAMES},
@@ -1432,6 +1458,7 @@ class CameraService:
         self._state.update(
             {
                 "running": camera_index is not None,
+                "session_id": uuid.uuid4().hex if camera_index is not None else None,
                 "camera_index": camera_index,
                 "record_events": record_events,
                 "counts": {name: 0 for name in CLASS_NAMES},
@@ -1510,23 +1537,40 @@ class CameraService:
             )
             self._worker.start()
 
-    def stop(self) -> None:
+    def cancel_receiving(self, history_id: int, reason: str) -> dict[str, Any]:
         with self._lock:
+            job = self._receiving_service.cancel_queue(history_id, reason)
+            if self._state["receiving_job_id"] == job["job_id"]:
+                self._running = False
+                self._reset_state(None)
+                self._jpeg = placeholder_frame("Camera stopped")
+            return job
+
+    def stop(self, session_id: str | None = None) -> None:
+        with self._lock:
+            active_session = self._state["session_id"]
+            if session_id is not None and session_id != active_session:
+                return
             self._running = False
             worker = self._worker
             capture = self._capture
             receiving_job_id = self._state["receiving_job_id"]
             self._worker = None
             self._capture = None
+            if worker is None:
+                self._reset_state(None)
+                self._jpeg = placeholder_frame("Camera stopped")
         if worker is not None and worker is not threading.current_thread():
             worker.join(timeout=2)
         if capture is not None:
             capture.release()
         if receiving_job_id is not None:
             self._receiving_service.abort_camera(receiving_job_id)
-        with self._lock:
-            self._reset_state(None)
-            self._jpeg = placeholder_frame("Camera stopped")
+        if worker is not None:
+            with self._lock:
+                if self._state["session_id"] == active_session:
+                    self._reset_state(None)
+                    self._jpeg = placeholder_frame("Camera stopped")
 
     def latest_jpeg(self) -> bytes:
         with self._lock:
@@ -1674,22 +1718,26 @@ class CameraService:
                     self._event_saved = False
                     self._state["error"] = f"บันทึกรูปเหตุการณ์ไม่ได้: {error}"
 
-    def process_uploaded_frame(self, content: bytes) -> bytes:
+    def process_uploaded_frame(self, content: bytes, session_id: str | None = None) -> bytes:
         with self._lock:
             if not self._running:
                 raise RuntimeError("กรุณาเริ่มกล้องก่อนส่งภาพ")
+            active_session = self._state["session_id"]
+            if session_id is not None and session_id != active_session:
+                raise ValueError("รอบการตรวจด้วยกล้องจบแล้ว")
         frame = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
         if frame is None:
             raise ValueError("ไฟล์ภาพจากกล้องไม่ถูกต้อง")
         started = time.perf_counter()
         jpeg, counts, total = self._detect(frame)
         with self._lock:
+            if self._state["session_id"] != active_session:
+                raise ValueError("รอบการตรวจด้วยกล้องจบแล้ว")
             self._frames_processed += 1
-        now = time.perf_counter()
-        fps = 1 / max(now - (self._last_frame_time or started), 1e-6)
-        self._last_frame_time = now
-        self._publish(jpeg, counts, total)
-        with self._lock:
+            now = time.perf_counter()
+            fps = 1 / max(now - (self._last_frame_time or started), 1e-6)
+            self._last_frame_time = now
+            self._publish(jpeg, counts, total)
             self._state["fps"] = round(fps, 1)
         return jpeg
 
@@ -1928,16 +1976,19 @@ def start_camera(request: CameraRequest) -> dict[str, Any]:
 
 
 @app.post("/api/camera/stop")
-def stop_camera() -> dict[str, Any]:
-    camera.stop()
+def stop_camera(session_id: str | None = Query(default=None, max_length=100)) -> dict[str, Any]:
+    camera.stop(session_id)
     return camera.state()
 
 
 @app.post("/api/camera/frame")
-async def camera_frame(file: UploadFile = File(...)) -> dict[str, Any]:
+async def camera_frame(
+    file: UploadFile = File(...),
+    session_id: str | None = Query(default=None, max_length=100),
+) -> dict[str, Any]:
     try:
         content = await file.read()
-        jpeg = camera.process_uploaded_frame(content)
+        jpeg = camera.process_uploaded_frame(content, session_id)
     except (ValueError, RuntimeError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     encoded = base64.b64encode(jpeg).decode("ascii")
@@ -2000,6 +2051,18 @@ def receiving_history_detail(queue_id: int, response: Response) -> dict[str, Any
     if row is None:
         raise HTTPException(status_code=404, detail="ไม่พบคิวนี้")
     return row
+
+
+@app.post("/api/receiving-history/{queue_id}/cancel")
+def cancel_receiving_queue(queue_id: int, request: CancelQueueRequest) -> dict[str, Any]:
+    sensor = arduino.state()
+    try:
+        job = camera.cancel_receiving(queue_id, request.reason.strip())
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if sensor["capture_pending"] and sensor["capture_request_id"]:
+        arduino.acknowledge_capture(sensor["capture_request_id"])
+    return {"job": job, "camera": camera.state()}
 
 
 @app.get("/api/receiving-history/{queue_id}/images/{image_id}")

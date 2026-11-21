@@ -191,7 +191,7 @@
     .history-status { font-size: 12px; color: var(--muted); text-align: right; }
     .history-status.waiting_ir, .history-status.in_progress { color: #087d83; }
     .history-status.completed { color: var(--green); }
-    .history-status.rejected, .history-status.incomplete, .history-status.interrupted { color: var(--red); }
+    .history-status.rejected, .history-status.incomplete, .history-status.interrupted, .history-status.cancelled { color: var(--red); }
     .history-detail { padding: 0 0 16px; }
     .history-detail ul { margin: 8px 0 12px; padding-inline-start: 22px; }
     .history-detail .tiny { overflow-wrap: anywhere; }
@@ -216,6 +216,9 @@
     .sensor-label { font-size: 12px; color: var(--muted); }
     .sensor-value { display: block; margin-top: 3px; font-size: 14px; }
     .sensor-connection { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-top: 3px; }
+    .active-queue { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+    .active-queue[hidden] { display: none; }
+    .active-queue button { font-size: 13px; }
     .presence-state.on { color: var(--green); }
     .presence-state.off, .presence-state.stale { color: var(--amber); }
     .sensor-health.ready { color: var(--green); }
@@ -276,6 +279,10 @@
               <strong id="object-presence" class="sensor-value presence-state" aria-live="polite">ยังไม่มีข้อมูล</strong>
             </div>
           </div>
+          <div id="active-queue" class="active-queue" hidden>
+            <p id="active-queue-message" aria-live="polite"></p>
+            <button id="cancel-queue-button" type="button" class="danger">ยกเลิกการตรวจรับ</button>
+          </div>
           <div class="video-frame" id="video-frame">
             <video id="camera-preview" autoplay muted playsinline></video>
             <img id="camera-stream" alt="ภาพจากกล้องพร้อมกรอบตรวจจับ">
@@ -334,6 +341,10 @@
     const byId = (id) => document.getElementById(id);
     let cameraRunning = false;
     let browserStream = null;
+    let browserSessionId = null;
+    let observedCameraSessionId = null;
+    let activeQueueId = null;
+    let cancelInFlight = false;
     let cameraTestMode = false;
     let selectedCameraId = "";
     let frameTimer = null;
@@ -380,6 +391,10 @@
     }
 
     function renderCamera(camera) {
+      observedCameraSessionId = camera.session_id;
+      if (browserSessionId && browserSessionId !== observedCameraSessionId) {
+        releaseBrowserCamera();
+      }
       cameraRunning = camera.running;
       cameraTestMode = cameraRunning
         && camera.record_events === false
@@ -465,11 +480,63 @@
     function renderStatus(data) {
       renderCamera(data.camera);
       renderArduino(data.arduino);
+      renderActiveQueue(data.receiving?.job, data.arduino, data.camera);
       maybeStopReceivingCamera(data.camera, data.receiving);
-      maybeStartTriggeredCapture(data.arduino, data.receiving);
+      maybeStartTriggeredCapture(data.arduino, data.receiving, data.camera);
       const online = data.camera.running || data.arduino.connected;
       byId("system-status").textContent = online ? "ระบบออนไลน์" : "ระบบพร้อมใช้งาน";
       byId("system-status").classList.toggle("online", online);
+    }
+
+    function renderActiveQueue(job, arduino, camera) {
+      const active = job && ["waiting_ir", "in_progress"].includes(job.status);
+      byId("active-queue").hidden = !active;
+      activeQueueId = active ? job.history_id : null;
+      byId("cancel-queue-button").disabled = cancelInFlight;
+      if (!active) return;
+      let message = job.message;
+      if (job.status === "waiting_ir") {
+        if (!arduino.ir_ready) message = "รอสัญญาณจากเซนเซอร์แท่นวาง";
+        else if (!arduino.object_present) message = "รอวางอุปกรณ์บนแท่น";
+        else if (!arduino.capture_pending) message = "นำอุปกรณ์เดิมออกจากแท่นก่อนเริ่มรอบใหม่";
+        else if (!camera.background_ready) message = "รอบันทึกฉากหลังว่างก่อนเปิดกล้องตรวจ";
+        else message = "พบอุปกรณ์บนแท่น · กำลังเตรียมกล้อง";
+      } else if (job.progress?.Unknown && job.progress.Unknown.detected < job.progress.Unknown.requested) {
+        message = (job.unknown_reference_count || 0) < job.progress.Unknown.requested
+          ? "รอภาพอ้างอิงที่ใช้ตรวจได้จาก ARMbot"
+          : "กำลังเทียบภาพอุปกรณ์ · ผลตรวจยังไม่ครบ";
+      }
+      const status = byId("active-queue-message");
+      if (status.textContent !== message) status.textContent = message;
+    }
+
+    async function cancelActiveQueue() {
+      const queueId = activeQueueId;
+      if (!queueId || cancelInFlight) return;
+      const reason = window.prompt("ระบุเหตุผลที่ยกเลิกการตรวจรับ");
+      if (reason === null) return;
+      if (!reason.trim() || reason.trim().length > 200) {
+        showError("กรุณาระบุเหตุผล 1–200 ตัวอักษร");
+        return;
+      }
+      cancelInFlight = true;
+      const button = byId("cancel-queue-button");
+      button.disabled = true;
+      try {
+        const result = await request(`/api/receiving-history/${queueId}/cancel`, {
+          method: "POST",
+          body: JSON.stringify({ reason: reason.trim() })
+        });
+        renderCamera(result.camera);
+        byId("active-queue").hidden = true;
+      } catch (error) {
+        showError(`ยกเลิกคิวไม่ได้: ${error.message}`);
+      } finally {
+        cancelInFlight = false;
+        button.disabled = false;
+        await refreshStatus();
+        await refreshHistory();
+      }
     }
 
     async function refreshStatus() {
@@ -501,7 +568,8 @@
     }
 
     async function sendCameraFrame() {
-      if (!cameraRunning || frameInFlight) return;
+      const sessionId = browserSessionId;
+      if (!cameraRunning || !sessionId || frameInFlight) return;
       const video = byId("camera-preview");
       if (video.readyState < 2 || !video.videoWidth) return;
       frameInFlight = true;
@@ -515,18 +583,23 @@
         if (!blob) throw new Error("สร้างภาพจากกล้องไม่ได้");
         const form = new FormData();
         form.append("file", blob, "camera.jpg");
-        const response = await fetch("/api/camera/frame", { method: "POST", body: form });
+        if (browserSessionId !== sessionId) return;
+        const response = await fetch(`/api/camera/frame?session_id=${sessionId}`, { method: "POST", body: form });
         const payload = await response.json();
+        if (browserSessionId !== sessionId) return;
         if (!response.ok) throw new Error(payload.detail || "ส่งภาพไปประมวลผลไม่ได้");
         byId("camera-stream").src = payload.image;
         byId("video-frame").classList.add("has-result");
         renderCamera(payload.camera);
         if (payload.camera.capture_completed && !captureClosing) {
           captureClosing = true;
-          await stopBrowserCamera();
-          captureClosing = false;
-          await refreshStatus();
-          await refreshHistory();
+          try {
+            await stopBrowserCamera();
+            await refreshStatus();
+            await refreshHistory();
+          } finally {
+            captureClosing = false;
+          }
         }
       } catch (error) {
         showError(error.message);
@@ -628,33 +701,57 @@
           height: { ideal: 720 }
         };
         if (deviceId) videoConstraints.deviceId = { exact: deviceId };
-        browserStream = await navigator.mediaDevices.getUserMedia({
+        const stream = await navigator.mediaDevices.getUserMedia({
           video: videoConstraints,
           audio: false
         });
+        let current;
+        try {
+          current = (await request("/api/status")).camera;
+        } catch (error) {
+          stream.getTracks().forEach((track) => track.stop());
+          throw error;
+        }
+        if (current.session_id !== cameraState.session_id || !current.running) {
+          stream.getTracks().forEach((track) => track.stop());
+          renderCamera(current);
+          return false;
+        }
+        browserStream = stream;
+        browserSessionId = cameraState.session_id;
         const video = byId("camera-preview");
         video.srcObject = browserStream;
         await video.play();
+        if (browserSessionId !== cameraState.session_id) return false;
         cameraRunning = true;
         cameraTestMode = !recordEvents && !receiveJobId;
         await refreshCameraList(deviceId);
         frameTimer = setInterval(sendCameraFrame, 700);
         await sendCameraFrame();
+        return true;
       } catch (error) {
-        await request("/api/camera/stop", { method: "POST" }).catch(() => {});
+        if (browserSessionId === cameraState.session_id) releaseBrowserCamera();
+        await request(`/api/camera/stop?session_id=${cameraState.session_id}`, { method: "POST" }).catch(() => {});
         throw new Error(`เปิดกล้องไม่ได้: ${error.message}`);
       }
     }
 
-    async function stopBrowserCamera() {
+    function releaseBrowserCamera() {
       if (frameTimer) clearInterval(frameTimer);
       frameTimer = null;
       if (browserStream) browserStream.getTracks().forEach((track) => track.stop());
       browserStream = null;
+      browserSessionId = null;
       byId("camera-preview").srcObject = null;
       cameraRunning = false;
       cameraTestMode = false;
-      await request("/api/camera/stop", { method: "POST" });
+    }
+
+    async function stopBrowserCamera() {
+      const sessionId = browserSessionId || observedCameraSessionId;
+      releaseBrowserCamera();
+      const query = sessionId ? `?session_id=${sessionId}` : "";
+      await request(`/api/camera/stop${query}`, { method: "POST" });
     }
 
     async function toggleCamera() {
@@ -671,19 +768,20 @@
       }
     }
 
-    async function maybeStartTriggeredCapture(arduino, receiving) {
+    async function maybeStartTriggeredCapture(arduino, receiving, camera) {
       const job = receiving?.job;
       if (!job || job.status !== "waiting_ir" || !arduino.ir_ready || !arduino.object_present) return;
+      if (!camera.background_ready) return;
       const requestId = arduino.capture_request_id;
       if (!arduino.capture_pending || !requestId || requestId === lastCaptureRequestId) return;
-      if (captureRequestInFlight || Date.now() < captureRetryAt) return;
+      if (cancelInFlight || captureRequestInFlight || Date.now() < captureRetryAt) return;
       captureRequestInFlight = true;
       try {
         if (cameraRunning) {
           if (!cameraTestMode) return;
           await stopBrowserCamera();
         }
-        await startBrowserCamera(requestId, false, job.job_id);
+        if (!await startBrowserCamera(requestId, false, job.job_id)) return;
         await request("/api/capture/ack", {
           method: "POST",
           body: JSON.stringify({ request_id: requestId })
@@ -701,6 +799,7 @@
       waiting_ir: "รอวางอุปกรณ์",
       in_progress: "กำลังตรวจ",
       completed: "ยืนยันรับแล้ว",
+      cancelled: "ยกเลิกแล้ว",
       incomplete: "ตรวจไม่ครบ",
       rejected: "คิวไม่ถูกเริ่ม",
       interrupted: "การตรวจถูกขัดจังหวะ"
@@ -854,6 +953,7 @@
     byId("history-older").addEventListener("click", () => {
       if (olderCursor !== null) refreshHistory(olderCursor, "older");
     });
+    byId("cancel-queue-button").addEventListener("click", cancelActiveQueue);
     byId("history-newer").addEventListener("click", () => {
       if (newerPages.length) refreshHistory(newerPages.at(-1), "newer");
     });
