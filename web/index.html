@@ -567,7 +567,12 @@
         nameElement.textContent = item.name;
         const meta = document.createElement("div");
         meta.className = "item-meta";
+        const isUnknown = item.name === "Unknown";
+        const references = job.unknown_reference_count || 0;
         meta.textContent = `${item.detected || 0}/${item.requested} ชิ้น`;
+        if (isUnknown && isActive && references) {
+          meta.textContent += ` · ได้ภาพอ้างอิง ${references} ภาพ`;
+        }
         details.append(nameElement, meta);
         const badge = document.createElement("div");
         badge.className = `item-badge${isActive ? " active" : ""}`;
@@ -576,7 +581,7 @@
           : job.status === "incomplete"
             ? "ตรวจไม่ครบ"
             : job.status === "in_progress"
-              ? "กำลังตรวจ"
+              ? (isUnknown && !references ? "รอภาพจาก ARMbot" : "กำลังตรวจ")
               : "รอ IR";
         row.append(details, badge);
         list.append(row);
@@ -747,7 +752,7 @@
         video.srcObject = browserStream;
         await video.play();
         cameraRunning = true;
-        cameraTestMode = !recordEvents;
+        cameraTestMode = !recordEvents && !receiveJobId;
         await refreshCameraList(deviceId);
         frameTimer = setInterval(sendCameraFrame, 700);
         await sendCameraFrame();
@@ -784,7 +789,7 @@
 
     async function maybeStartTriggeredCapture(arduino, receiving) {
       const job = receiving?.job;
-      if (!job || job.status !== "waiting_ir") return;
+      if (!job || job.status !== "waiting_ir" || !arduino.ir_ready || !arduino.object_present) return;
       const requestId = arduino.capture_request_id;
       if (!arduino.capture_pending || !requestId || requestId === lastCaptureRequestId) return;
       if (captureRequestInFlight || Date.now() < captureRetryAt) return;

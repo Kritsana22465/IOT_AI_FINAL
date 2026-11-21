@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import math
 import os
 import secrets
 import threading
@@ -11,7 +12,7 @@ import uuid
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Literal
+from typing import Any, Callable, Iterator, Literal
 from urllib.parse import quote
 
 import boto3
@@ -25,6 +26,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Json
 from pydantic import BaseModel, Field, ValidationError
 from ultralytics import YOLO
+from unknown_matching import ObjectSignature, describe_object, match_objects
 
 
 ROOT = Path(__file__).resolve().parent
@@ -59,6 +61,7 @@ CLASS_NAMES = (
     "Ultrasonic HC-SR04",
     "Unknown",
 )
+UNKNOWN_LABEL = "Unknown"
 MODEL_CLASS_LABELS = {
     "relay_module": "Relay module",
     "relay module": "Relay module",
@@ -66,6 +69,7 @@ MODEL_CLASS_LABELS = {
     "triple syringe": "Triple syringe",
     "ultrasonic_hc-sr04": "Ultrasonic HC-SR04",
     "ultrasonic hc-sr04": "Ultrasonic HC-SR04",
+    "unknown": UNKNOWN_LABEL,
 }
 ITEM_TO_YOLO_CLASS = {
     "relay": "relay_module",
@@ -73,6 +77,7 @@ ITEM_TO_YOLO_CLASS = {
     "triple_syringe": "triple_syringe",
     "ultrasonic": "ultrasonic_hc-sr04",
     "ultrasonic_hc-sr04": "ultrasonic_hc-sr04",
+    "unknown": "unknown",
 }
 SENSOR_TIMEOUT_SECONDS = float(os.getenv("SENSOR_TIMEOUT_SECONDS", "10"))
 REARM_SECONDS = float(os.getenv("REARM_SECONDS", "10"))
@@ -91,6 +96,12 @@ MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 MQTT_QUEUE_TOPIC = os.getenv("MQTT_QUEUE_TOPIC", "armbot-010eb21b/cmd/queue").strip()
 MQTT_EVENT_TOPIC = os.getenv("MQTT_EVENT_TOPIC", "armbot-010eb21b/event").strip()
 MQTT_STATUS_TOPIC = os.getenv("MQTT_STATUS_TOPIC", "armbot-010eb21b/status").strip()
+MQTT_ARMBOT_PREFIX = MQTT_QUEUE_TOPIC.rsplit("/cmd/", 1)[0]
+MQTT_ARMBOT_EVENT_TOPIC = f"{MQTT_ARMBOT_PREFIX}/event"
+MQTT_UNKNOWN_TOPIC = f"{MQTT_ARMBOT_PREFIX}/unknown"
+MQTT_UNKNOWN_IMAGE_TOPIC = f"{MQTT_UNKNOWN_TOPIC}/image"
+UNKNOWN_IMAGE_MAX_BYTES = 1024 * 1024
+UNKNOWN_IMAGE_PAIR_SECONDS = 5
 LOGGER = logging.getLogger(__name__)
 
 
@@ -114,7 +125,7 @@ class CaptureAckRequest(BaseModel):
 
 class ReceivingItem(BaseModel):
     equipment: Literal[
-        "relay_module", "triple_syringe", "ultrasonic_hc-sr04"
+        "relay_module", "triple_syringe", "ultrasonic_hc-sr04", "unknown"
     ] = Field(alias="class")
     quantity: int = Field(ge=1, le=100)
 
@@ -376,6 +387,10 @@ class MqttReceivingService:
         self._lock = threading.RLock()
         self._client: mqtt.Client | None = None
         self._job: dict[str, Any] | None = None
+        self._unknown_image_info: tuple[float, dict[str, Any]] | None = None
+        self._unknown_references: dict[
+            tuple[str, float], ObjectSignature
+        ] = {}
         self._last_messages: dict[str, dict[str, Any]] = {}
         self._test_event: threading.Event | None = None
         self._test_topics_seen: set[str] = set()
@@ -532,7 +547,12 @@ class MqttReceivingService:
             job_state = self._job_snapshot_locked()
         self._publish_job_state(job_state, "processing")
 
-    def observe(self, job_id: str, counts: dict[str, int]) -> dict[str, Any] | None:
+    def observe(
+        self,
+        job_id: str,
+        counts: dict[str, int],
+        save_result: Callable[[dict[str, int]], None],
+    ) -> None:
         job_state: dict[str, Any] | None = None
         event_type = "progress"
         with self._lock:
@@ -546,7 +566,9 @@ class MqttReceivingService:
 
             changed = False
             for name in job["requested"]:
-                observed = max(job["detected"][name], counts.get(name, 0))
+                observed = counts.get(name, 0)
+                if name != UNKNOWN_LABEL:
+                    observed = max(job["detected"][name], observed)
                 if observed != job["detected"][name]:
                     job["detected"][name] = observed
                     changed = True
@@ -556,6 +578,7 @@ class MqttReceivingService:
                 for name, quantity in job["requested"].items()
             )
             if complete:
+                save_result(dict(job["requested"]))
                 job_state = self._finish_locked("completed", "รับของเรียบร้อย")
                 event_type = "completed"
             elif changed:
@@ -572,7 +595,6 @@ class MqttReceivingService:
 
         if job_state is not None:
             self._publish_job_state(job_state, event_type)
-        return job_state
 
     def abort_camera(self, job_id: str) -> None:
         with self._lock:
@@ -603,7 +625,14 @@ class MqttReceivingService:
                 self._mqtt_error = error
             LOGGER.error(error)
             return
-        result, _ = client.subscribe([(MQTT_QUEUE_TOPIC, 1)])
+        result, _ = client.subscribe(
+            [
+                (MQTT_QUEUE_TOPIC, 1),
+                (MQTT_ARMBOT_EVENT_TOPIC, 1),
+                (MQTT_UNKNOWN_TOPIC, 1),
+                (MQTT_UNKNOWN_IMAGE_TOPIC, 0),
+            ]
+        )
         with self._lock:
             self._mqtt_connected = result == mqtt.MQTT_ERR_SUCCESS
             self._mqtt_error = (
@@ -624,6 +653,7 @@ class MqttReceivingService:
     ) -> None:
         with self._lock:
             self._mqtt_connected = False
+            self._unknown_image_info = None
             if reason_code != 0:
                 self._mqtt_error = f"MQTT disconnected: {reason_code}"
                 LOGGER.warning(self._mqtt_error)
@@ -639,28 +669,37 @@ class MqttReceivingService:
     def _on_message(
         self, _client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage
     ) -> None:
+        if message.topic == MQTT_UNKNOWN_IMAGE_TOPIC:
+            if not message.retain:
+                self._receive_unknown_image(message.payload)
+            return
+        if message.topic != MQTT_QUEUE_TOPIC:
+            if not message.retain:
+                self._receive_armbot_message(message.topic, message.payload)
+            return
         payload: Any = None
         try:
             payload = json.loads(message.payload.decode("utf-8"))
             if not isinstance(payload, dict):
                 raise TypeError("MQTT payload must be a JSON object")
 
-            if message.topic == MQTT_QUEUE_TOPIC:
-                with self._lock:
-                    self._last_messages[message.topic] = {
-                        "received_at": time.time(),
-                        "payload": payload,
-                    }
-                    if self._test_event is not None:
-                        self._test_topics_seen.add(message.topic)
-                        if self._test_topics_seen == {MQTT_QUEUE_TOPIC}:
-                            self._test_event.set()
+            with self._lock:
+                self._last_messages[message.topic] = {
+                    "received_at": time.time(),
+                    "payload": payload,
+                }
+                if self._test_event is not None:
+                    self._test_topics_seen.add(message.topic)
+                    if self._test_topics_seen == {MQTT_QUEUE_TOPIC}:
+                        self._test_event.set()
 
             source = payload.get("source", "mqtt")
             if not isinstance(source, str):
                 raise TypeError("source must be a string")
 
             item_id = payload.get("item_id") or payload.get("text")
+            if payload.get("type") == "unknown" or payload.get("barcode") == "ARM-0099":
+                item_id = "unknown"
             if item_id is not None:
                 if not isinstance(item_id, str):
                     raise TypeError("item_id must be a string")
@@ -685,6 +724,9 @@ class MqttReceivingService:
                     request,
                     item_id=item_id.strip().lower(),
                     source=source,
+                    armbot_job_id=self._explicit_armbot_job_id(payload)
+                    if yolo_class == "unknown"
+                    else None,
                 )
                 return
 
@@ -718,13 +760,161 @@ class MqttReceivingService:
             request,
             item_id=item_id,
             source=payload.get("source", "mqtt"),
+            armbot_job_id=self._explicit_armbot_job_id(payload)
+            if any(item.equipment == "unknown" for item in request.items)
+            else None,
         )
+
+    @staticmethod
+    def _explicit_armbot_job_id(payload: dict[str, Any]) -> str | None:
+        job_id = payload.get("armbot_job_id")
+        return str(job_id) if type(job_id) is int else None
+
+    def _receive_armbot_message(self, topic: str, raw: bytes) -> None:
+        if topic not in (MQTT_ARMBOT_EVENT_TOPIC, MQTT_UNKNOWN_TOPIC) or len(raw) > 8192:
+            return
+        if topic == MQTT_UNKNOWN_TOPIC:
+            with self._lock:
+                self._unknown_image_info = None
+        try:
+            payload = json.loads(raw)
+        except (ValueError, UnicodeError):
+            return
+        if not isinstance(payload, dict):
+            return
+        if topic == MQTT_UNKNOWN_TOPIC:
+            if payload.get("type") == "unknown_object":
+                with self._lock:
+                    self._unknown_image_info = (time.monotonic(), payload)
+            return
+        if payload.get("type") != "queued":
+            return
+        # ARMbot's acknowledgment contains a nested job. Our own queue events don't.
+        robot_job = payload.get("job")
+        if not isinstance(robot_job, dict) or robot_job.get("item_id") != "unknown":
+            return
+        arm_id = robot_job.get("id")
+        source = robot_job.get("source")
+        count = robot_job.get("count")
+        if (
+            type(arm_id) is not int
+            or not isinstance(source, str)
+            or type(count) is not int
+        ):
+            return
+        if not 1 <= count <= 100:
+            return
+        with self._lock:
+            job = self._job
+            if job is not None:
+                if job.get("armbot_job_id") == str(arm_id):
+                    return
+                if job["status"] in ("waiting_ir", "in_progress"):
+                    if (
+                        UNKNOWN_LABEL in job["requested"]
+                        and job["source"] == source
+                        and job.get("armbot_job_id") is None
+                    ):
+                        job["armbot_job_id"] = str(arm_id)
+                        if len(job["requested"]) == 1:
+                            job["requested"][UNKNOWN_LABEL] = count
+                        self._unknown_references = {
+                            key: value
+                            for key, value in self._unknown_references.items()
+                            if key[0] == str(arm_id)
+                        }
+                    return
+        request = ReceivingRequest(
+            job_id=f"armbot-unknown-{arm_id}-{uuid.uuid4().hex}",
+            items=[ReceivingItem(**{"class": "unknown", "quantity": count})],
+        )
+        self.submit(request, item_id="unknown", source=source, armbot_job_id=str(arm_id))
+
+    def _receive_unknown_image(self, raw: bytes) -> None:
+        with self._lock:
+            info = self._unknown_image_info
+            self._unknown_image_info = None
+            job = self._job
+            if (
+                info is None
+                or job is None
+                or job["status"] not in ("waiting_ir", "in_progress")
+                or UNKNOWN_LABEL not in job["requested"]
+            ):
+                return
+        received_at, metadata = info
+        if time.monotonic() - received_at > UNKNOWN_IMAGE_PAIR_SECONDS:
+            return
+        arm_id = metadata.get("job_id")
+        captured_at = metadata.get("time")
+        if (
+            type(arm_id) is not int
+            or type(captured_at) not in (int, float)
+            or not 0 < captured_at < math.inf
+        ):
+            return
+        key = (str(arm_id), captured_at)
+        box = metadata.get("box")
+        size = metadata.get("image_size")
+        if not isinstance(box, dict) or not isinstance(size, list) or len(size) != 2:
+            return
+        coordinates = [box.get(axis) for axis in ("x1", "y1", "x2", "y2")]
+        if any(type(value) is not int for value in (*coordinates, *size)):
+            return
+        width, height = size
+        if not (0 < width <= 4096 and 0 < height <= 4096):
+            return
+        x1, y1, x2, y2 = coordinates
+        # ARMbot draws the box on the published JPEG. Trim its border before comparing.
+        x1, y1 = max(0, x1 + 3), max(0, y1 + 3)
+        x2, y2 = min(width, x2 - 3), min(height, y2 - 3)
+        if min(x2 - x1, y2 - y1) < 16 or not (
+            0 < len(raw) <= UNKNOWN_IMAGE_MAX_BYTES and raw.startswith(b"\xff\xd8")
+        ):
+            return
+        with self._lock:
+            arm_job_id = job.get("armbot_job_id")
+            if (
+                (arm_job_id is not None and key[0] != arm_job_id)
+                or key in self._unknown_references
+            ):
+                return
+        try:
+            frame = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if frame is None or frame.shape[:2] != (height, width):
+                return
+            signature = describe_object(frame[y1:y2, x1:x2])
+        except cv2.error:
+            LOGGER.warning("Could not decode ARMbot image for job %s", arm_id)
+            return
+        if signature is None:
+            return
+        with self._lock:
+            if self._job is job and len(self._unknown_references) < 100:
+                self._unknown_references[key] = signature
+
+    def unknown_references(
+        self, job_id: str
+    ) -> tuple[bool, tuple[ObjectSignature, ...]]:
+        with self._lock:
+            job = self._job
+            if (
+                job is None or job["job_id"] != job_id
+                or UNKNOWN_LABEL not in job["requested"]
+            ):
+                return False, ()
+            return len(job["requested"]) > 1, tuple(
+                signature
+                for (arm_id, _), signature in self._unknown_references.items()
+                if arm_id == job.get("armbot_job_id")
+            )
 
     def submit(
         self,
         request: ReceivingRequest,
         item_id: str | None = None,
         source: str = "mqtt",
+        armbot_job_id: str | None = None,
     ) -> None:
         if not request.items:
             self._publish_event(
@@ -783,6 +973,8 @@ class MqttReceivingService:
                 result = None
                 accepted = False
             else:
+                self._unknown_references.clear()
+                self._unknown_image_info = None
                 self._job = {
                     "job_id": request.job_id,
                     "status": "waiting_ir",
@@ -791,6 +983,7 @@ class MqttReceivingService:
                     "detected": {name: 0 for name in requested},
                     "item_id": item_id,
                     "source": source,
+                    "armbot_job_id": armbot_job_id,
                     "success": False,
                     "message": "รอ IR ตรวจพบอุปกรณ์",
                 }
@@ -846,6 +1039,11 @@ class MqttReceivingService:
             for name, quantity in self._job["requested"].items()
         )
         job["remaining_count"] = max(0, job["count"] - job["detected_count"])
+        if UNKNOWN_LABEL in job["requested"]:
+            job["unknown_reference_count"] = sum(
+                arm_id == job["armbot_job_id"]
+                for arm_id, _ in self._unknown_references
+            )
         if len(self._job["requested"]) == 1:
             class_name = next(iter(self._job["requested"]))
             model_class = next(
@@ -1197,21 +1395,40 @@ class CameraService:
             ):
                 model_name = result.names[class_id].casefold()
                 name = MODEL_CLASS_LABELS.get(model_name)
-                if name in counts:
+                if name in counts and name != UNKNOWN_LABEL:
                     counts[name] += 1
                     known_boxes.append(tuple(box))
+        with self._lock:
+            receiving_job_id = self._state["receiving_job_id"]
         background_reference = self._background_reference
         if background_reference is not None:
-            for x, y, width, height in find_unknown_regions(
-                frame, background_reference, known_boxes
-            ):
-                counts["Unknown"] += 1
+            boxes_to_draw = []
+            label = UNKNOWN_LABEL
+            if receiving_job_id is None:
+                boxes_to_draw = find_unknown_regions(frame, background_reference, known_boxes)
+            else:
+                mixed_order, references = self._receiving_service.unknown_references(
+                    receiving_job_id
+                )
+                if references:
+                    regions = find_unknown_regions(
+                        frame, background_reference, known_boxes if mixed_order else []
+                    )
+                    candidates = [
+                        describe_object(frame[y : y + height, x : x + width])
+                        for x, y, width, height in regions
+                    ]
+                    matched = match_objects(references, candidates)
+                    boxes_to_draw = [regions[index] for index in sorted(matched)]
+                    label = "Unknown match"
+            counts[UNKNOWN_LABEL] = len(boxes_to_draw)
+            for x, y, width, height in boxes_to_draw:
                 cv2.rectangle(
                     annotated, (x, y), (x + width, y + height), (0, 191, 255), 2
                 )
                 cv2.putText(
                     annotated,
-                    "Unknown",
+                    label,
                     (x, max(20, y - 6)),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
@@ -1248,41 +1465,20 @@ class CameraService:
             if event_to_save:
                 self._event_saved = True
             receiving_job_id = self._state["receiving_job_id"]
-        receiving_job_state: dict[str, Any] | None = None
-        if receiving_job_id is not None:
-            receiving_job_state = self._receiving_service.observe(
-                receiving_job_id, counts
-            )
-        if (
-            receiving_job_state is not None
-            and receiving_job_state["status"] in ("completed", "incomplete")
-        ):
-            with self._lock:
-                receiving_event_to_save = not self._event_saved
-                if receiving_event_to_save:
+            if receiving_job_id is not None and self._running and not self._event_saved:
+                def save_inspection(labels: dict[str, int]) -> None:
+                    event = self._event_store.create(jpeg, labels, sum(labels.values()))
                     self._event_saved = True
-            if receiving_event_to_save and receiving_job_state["detected_count"] > 0:
-                labels = {
-                    name: progress["detected"]
-                    for name, progress in receiving_job_state["progress"].items()
-                    if progress["detected"]
-                }
+                    self._state["last_event_id"] = event["id"]
+                    self._state["last_event_at"] = event["detected_at"]
+                    self._state["capture_completed"] = True
+
                 try:
-                    event = self._event_store.create(
-                        jpeg,
-                        labels,
-                        receiving_job_state["detected_count"],
+                    self._receiving_service.observe(
+                        receiving_job_id, counts, save_inspection
                     )
-                    with self._lock:
-                        self._state["last_event_id"] = event["id"]
-                        self._state["last_event_at"] = event["detected_at"]
-                        self._state["capture_completed"] = True
                 except Exception as error:
-                    with self._lock:
-                        self._event_saved = False
-                        self._state["error"] = (
-                            f"บันทึกรูปเหตุการณ์ไม่ได้: {error}"
-                        )
+                    self._state["error"] = f"บันทึกรูปเหตุการณ์ไม่ได้: {error}"
         if event_to_save:
             labels = {name: count for name, count in counts.items() if count}
             try:
