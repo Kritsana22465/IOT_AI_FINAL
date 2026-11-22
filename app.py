@@ -30,7 +30,6 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Json
 from pydantic import BaseModel, Field, ValidationError
 from ultralytics import YOLO
-from unknown_matching import ObjectSignature, describe_object, match_objects
 
 
 ROOT = Path(__file__).resolve().parent
@@ -107,6 +106,10 @@ if not MQTT_STATUS_TOPIC or MQTT_STATUS_TOPIC == MQTT_ARMBOT_STATUS_TOPIC:
 MQTT_RESULT_TOPIC = (
     os.getenv("MQTT_RESULT_TOPIC", "").strip() or f"{MQTT_ARMBOT_PREFIX}/inspection/result"
 )
+# ทีมตรวจ Unknown: subscribe topic นี้เพื่อรับภาพจาก Dashboard ฝั่งรับของ
+MQTT_UNKNOWN_REVIEW_TOPIC = f"{MQTT_ARMBOT_PREFIX}/inspection/unknown/request"
+UNKNOWN_REVIEW_STATUS = "awaiting_review"
+UNKNOWN_REVIEW_MESSAGE = "บันทึกรูปแล้ว · รอทีมตรวจ Unknown"
 MQTT_ARMBOT_EVENT_TOPIC = f"{MQTT_ARMBOT_PREFIX}/event"
 MQTT_UNKNOWN_TOPIC = f"{MQTT_ARMBOT_PREFIX}/unknown"
 MQTT_UNKNOWN_IMAGE_TOPIC = f"{MQTT_UNKNOWN_TOPIC}/image"
@@ -312,7 +315,7 @@ class EventStore:
 
     def create(
         self, image: bytes, labels: dict[str, int], total: int,
-        *, queue_id: int | None = None,
+        *, queue_id: int | None = None, review_photo: bool = False,
     ) -> dict[str, Any]:
         event_key = uuid.uuid4().hex
         relative_path = f"{event_key}.jpg"
@@ -342,12 +345,17 @@ class EventStore:
                     updated = connection.execute(
                         """
                         UPDATE receiving_history
-                        SET event_id = %s, detected = %s, status = 'completed',
-                            message = 'รับของเรียบร้อย', updated_at = NOW(),
+                        SET event_id = %s, detected = %s, status = %s,
+                            message = %s, updated_at = NOW(),
                             mqtt_result_pending = TRUE
                         WHERE id = %s AND status = 'in_progress'
                         """,
-                        (row["id"], Json(labels), queue_id),
+                        (
+                            row["id"], Json(labels),
+                            UNKNOWN_REVIEW_STATUS if review_photo else "completed",
+                            UNKNOWN_REVIEW_MESSAGE if review_photo else "รับของเรียบร้อย",
+                            queue_id,
+                        ),
                     )
                     if updated.rowcount != 1:
                         raise RuntimeError("ไม่พบคิวที่กำลังตรวจ")
@@ -639,9 +647,6 @@ class MqttReceivingService:
         self._seen_armbot_acks: deque[tuple[int, float]] = deque(maxlen=100)
         self._armbot_terminal_jobs: list[dict[str, Any]] = []
         self._unknown_image_info: tuple[float, dict[str, Any]] | None = None
-        self._unknown_references: dict[
-            tuple[str, float], ObjectSignature
-        ] = {}
         self._pending_pick_images: dict[tuple[str, float], bytes] = {}
         self._last_messages: dict[str, dict[str, Any]] = {}
         self._test_event: threading.Event | None = None
@@ -668,11 +673,14 @@ class MqttReceivingService:
                 MQTT_QUEUE_TOPIC, MQTT_EVENT_TOPIC, MQTT_STATUS_TOPIC,
                 MQTT_ARMBOT_EVENT_TOPIC, MQTT_ARMBOT_STATUS_TOPIC, MQTT_UNKNOWN_TOPIC,
                 MQTT_UNKNOWN_IMAGE_TOPIC,
+                MQTT_UNKNOWN_REVIEW_TOPIC,
             )
             or MQTT_RESULT_TOPIC.startswith(f"{MQTT_ARMBOT_PREFIX}/cmd/")
             or any(character in MQTT_RESULT_TOPIC for character in ("#", "+", "\0"))
         ):
             raise RuntimeError("MQTT_RESULT_TOPIC must be a separate result topic")
+        if MQTT_UNKNOWN_REVIEW_TOPIC in (MQTT_STATUS_TOPIC, MQTT_EVENT_TOPIC):
+            raise RuntimeError("The Unknown review topic must be separate from status and events")
         if not 1 <= MQTT_PORT <= 65535:
             raise RuntimeError("MQTT_PORT must be between 1 and 65535")
         if MQTT_TRANSPORT not in {"tcp", "websockets"}:
@@ -837,7 +845,8 @@ class MqttReceivingService:
                 raise ValueError("MQTT receiving request is not waiting for IR")
             if fallback and self._fallback_in_seconds(job) != 0:
                 raise ValueError("คิวนี้ยังไม่พร้อมเปิดกล้องสำรอง")
-            if not background_ready and (not fallback or UNKNOWN_LABEL in job["requested"]):
+            review_photo = UNKNOWN_LABEL in job["requested"]
+            if not background_ready and not fallback and not review_photo:
                 raise ValueError(
                     "ยังไม่ได้ตั้งภาพอ้างอิงฉากหลัง "
                     "เปิดกล้องทดสอบขณะฉากว่างและบันทึกฉากหลังก่อน"
@@ -847,13 +856,19 @@ class MqttReceivingService:
                 "status": "in_progress",
                 "camera_fallback": fallback,
                 "message": (
-                    "กำลังตรวจด้วยกล้องสำรอง"
+                    "กำลังถ่ายรูปสำหรับทีมตรวจ Unknown"
+                    if review_photo else "กำลังตรวจด้วยกล้องสำรอง"
                     if fallback else "IR ตรวจพบอุปกรณ์ · เปิดกล้องรอของให้ครบ"
                 ),
             }
             self._event_store.update_queue(updated)
             job.update(updated)
             self._publish_job_state(self._job_snapshot_locked(), "processing")
+
+    def needs_review_photo(self, job_id: str | None) -> bool:
+        with self._lock:
+            job = self._job
+            return bool(job and job["job_id"] == job_id and UNKNOWN_LABEL in job["requested"])
 
     def observe(
         self,
@@ -872,11 +887,16 @@ class MqttReceivingService:
             ):
                 return
 
+            if UNKNOWN_LABEL in job["requested"]:
+                save_result({}, job["history_id"])
+                job.update(status=UNKNOWN_REVIEW_STATUS, message=UNKNOWN_REVIEW_MESSAGE)
+                self._publish_job_state(self._job_snapshot_locked(), UNKNOWN_REVIEW_STATUS)
+                self._results_ready.set()
+                return
+
             detected = {}
             for name in job["requested"]:
-                observed = counts.get(name, 0)
-                if name != UNKNOWN_LABEL:
-                    observed = max(job["detected"][name], observed)
+                observed = max(job["detected"][name], counts.get(name, 0))
                 detected[name] = min(observed, job["requested"][name])
 
             complete = all(
@@ -919,10 +939,6 @@ class MqttReceivingService:
     ) -> dict[str, Any] | None:
         if not job.get("camera_fallback"):
             return None
-        if UNKNOWN_LABEL in job["requested"]:
-            _, references = self.unknown_references(job["job_id"])
-            if len(references) < job["requested"][UNKNOWN_LABEL]:
-                return None
         now = time.monotonic()
         last_frame_at = job.get("fallback_last_frame_at")
         if last_frame_at is None or now - last_frame_at > FALLBACK_MAX_FRAME_GAP_SECONDS:
@@ -1319,9 +1335,6 @@ class MqttReceivingService:
         job.update(updated)
         if UNKNOWN_LABEL in job["requested"]:
             self._pending_pick_images.clear()
-            self._unknown_references = {
-                key: value for key, value in self._unknown_references.items() if key[0] == arm_id
-            }
 
     def _receive_unknown_image(self, raw: bytes) -> None:
         with self._lock:
@@ -1347,36 +1360,22 @@ class MqttReceivingService:
         ):
             return
         key = (str(arm_id), captured_at)
-        box = metadata.get("box")
         size = metadata.get("image_size")
-        if not isinstance(box, dict) or not isinstance(size, list) or len(size) != 2:
-            return
-        coordinates = [box.get(axis) for axis in ("x1", "y1", "x2", "y2")]
-        if any(type(value) is not int for value in (*coordinates, *size)):
+        if not isinstance(size, list) or len(size) != 2 or any(
+            type(value) is not int or not 0 < value <= 4096 for value in size
+        ):
             return
         width, height = size
-        if not (0 < width <= 4096 and 0 < height <= 4096):
-            return
-        x1, y1, x2, y2 = coordinates
-        # ARMbot draws the box on the published JPEG. Trim its border before comparing.
-        x1, y1 = max(0, x1 + 3), max(0, y1 + 3)
-        x2, y2 = min(width, x2 - 3), min(height, y2 - 3)
-        if min(x2 - x1, y2 - y1) < 16 or not (
-            0 < len(raw) <= UNKNOWN_IMAGE_MAX_BYTES and raw.startswith(b"\xff\xd8")
-        ):
+        if not (0 < len(raw) <= UNKNOWN_IMAGE_MAX_BYTES and raw.startswith(b"\xff\xd8")):
             return
         with self._lock:
             arm_job_id = job.get("armbot_job_id")
-            if (
-                (arm_job_id is not None and key[0] != arm_job_id)
-                or key in self._unknown_references
-            ):
+            if arm_job_id is not None and key[0] != arm_job_id:
                 return
         try:
             frame = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
             if frame is None or frame.shape[:2] != (height, width):
                 return
-            signature = describe_object(frame[y1:y2, x1:x2])
         except cv2.error:
             LOGGER.warning("Could not decode ARMbot image for job %s", arm_id)
             return
@@ -1387,24 +1386,6 @@ class MqttReceivingService:
                 self._event_store.save_pick_images(job["history_id"], [(captured_at, raw)])
             elif job.get("armbot_job_id") is None and len(self._pending_pick_images) < 8:
                 self._pending_pick_images[key] = raw
-            if signature is not None and len(self._unknown_references) < 100:
-                self._unknown_references[key] = signature
-
-    def unknown_references(
-        self, job_id: str
-    ) -> tuple[bool, tuple[ObjectSignature, ...]]:
-        with self._lock:
-            job = self._job
-            if (
-                job is None or job["job_id"] != job_id
-                or UNKNOWN_LABEL not in job["requested"]
-            ):
-                return False, ()
-            return len(job["requested"]) > 1, tuple(
-                signature
-                for (arm_id, _), signature in self._unknown_references.items()
-                if arm_id == job.get("armbot_job_id")
-            )
 
     def submit(
         self,
@@ -1476,7 +1457,6 @@ class MqttReceivingService:
                 )
             queued_job["history_id"] = history_id
             queued_job["replaces_active_queue"] = replaces_active_queue
-            self._unknown_references.clear()
             self._pending_pick_images.clear()
             self._unknown_image_info = None
             self._job = queued_job
@@ -1521,11 +1501,7 @@ class MqttReceivingService:
             for name, quantity in self._job["requested"].items()
         )
         job["remaining_count"] = max(0, job["count"] - job["detected_count"])
-        if UNKNOWN_LABEL in job["requested"]:
-            job["unknown_reference_count"] = sum(
-                arm_id == job["armbot_job_id"]
-                for arm_id, _ in self._unknown_references
-            )
+        job["needs_review_photo"] = UNKNOWN_LABEL in job["requested"]
         if len(self._job["requested"]) == 1:
             class_name = next(iter(self._job["requested"]))
             model_class = next(
@@ -1623,13 +1599,14 @@ class MqttReceivingService:
                         break
                     self._send_inspection_result(client, result)
                 except Exception:
-                    LOGGER.exception("Could not deliver queued MQTT inspection result")
+                    LOGGER.exception("Could not deliver queued MQTT inspection message")
                     if not self._results_stop.wait(5):
                         self._results_ready.set()
                     break
 
     def _send_inspection_result(self, client: mqtt.Client, row: dict[str, Any]) -> None:
         event_id = row["event_id"]
+        topic = MQTT_RESULT_TOPIC
         payload = {
             "schema_version": 1,
             "type": "inspection_result",
@@ -1641,7 +1618,7 @@ class MqttReceivingService:
             "requested": row["requested"],
             "detected": row["detected"],
         }
-        if row["status"] == "completed":
+        if row["status"] in ("completed", UNKNOWN_REVIEW_STATUS):
             image = self._event_store.image_bytes(event_id)
             if image is None:
                 if self._event_store.get(event_id) is None:
@@ -1652,15 +1629,28 @@ class MqttReceivingService:
                 "encoding": "base64",
                 "data": base64.b64encode(image).decode("ascii"),
             }
+            if row["status"] == UNKNOWN_REVIEW_STATUS:
+                topic = MQTT_UNKNOWN_REVIEW_TOPIC
+                # ทีมตรวจ Unknown: ตัดข้อความซ้ำด้วย request_id แล้วถอด image.data
+                # จาก Base64 เป็น JPEG และตรวจตาม requested โดยอ้างอิง job_id
+                # หรือ armbot_job_id ของงานหยิบ
+                payload.update(
+                    type="unknown_review_request",
+                    request_id=f"queue:{row['queue_id']}",
+                    captured_at=payload.pop("completed_at"),
+                )
+                del payload["detected"]
+                # หากต้องการส่งผลกลับ Dashboard ให้ตกลง topic ตอบและใช้ request_id เดิม
+                # แล้วเพิ่มตัวรับผลใน Dashboard เพื่ออัปเดตคิว awaiting_review
         else:
             payload.update(
                 result_id=f"queue:{row['queue_id']}", reason="camera_timeout", image=None
             )
         message = client.publish(
-            MQTT_RESULT_TOPIC, json.dumps(payload, ensure_ascii=False), qos=1, retain=False
+            topic, json.dumps(payload, ensure_ascii=False), qos=1, retain=False
         )
         if message.rc != mqtt.MQTT_ERR_SUCCESS:
-            raise RuntimeError(f"MQTT result publish failed: {message.rc}")
+            raise RuntimeError(f"MQTT inspection publish failed: {message.rc}")
         message.wait_for_publish(timeout=5)
         if not message.is_published():
             raise RuntimeError(f"MQTT broker has not acknowledged event {event_id}")
@@ -1795,6 +1785,7 @@ class CameraService:
             "capture_trigger_id": None,
             "capture_completed": False,
             "receiving_job_id": None,
+            "review_capture": False,
             "background_ready": self._background_reference is not None,
         }
 
@@ -1818,6 +1809,7 @@ class CameraService:
         trigger_id: str | None = None,
         record_events: bool = True,
         receiving_job_id: str | None = None,
+        review_capture: bool = False,
     ) -> None:
         self._event_saved = False
         self._frames_processed = 0
@@ -1839,6 +1831,7 @@ class CameraService:
                 "capture_trigger_id": trigger_id,
                 "capture_completed": False,
                 "receiving_job_id": receiving_job_id,
+                "review_capture": review_capture,
                 "background_ready": self._background_reference is not None,
             }
         )
@@ -1857,7 +1850,9 @@ class CameraService:
         with self._lock:
             if self._running:
                 raise ValueError("กล้องกำลังทำงานอยู่แล้ว")
-            self._load_model()
+            review_capture = self._receiving_service.needs_review_photo(request.receive_job_id)
+            if not review_capture:
+                self._load_model()
             if request.receive_job_id is not None:
                 self._receiving_service.attach_camera(
                     request.receive_job_id,
@@ -1875,6 +1870,7 @@ class CameraService:
                 request.trigger_id,
                 request.record_events and request.receive_job_id is None,
                 request.receive_job_id,
+                review_capture,
             )
 
     def start_local(self, request: CameraRequest) -> None:
@@ -2006,33 +2002,13 @@ class CameraService:
         with self._lock:
             receiving_job_id = self._state["receiving_job_id"]
         background_reference = self._background_reference
-        if background_reference is not None:
-            boxes_to_draw = []
-            label = UNKNOWN_LABEL
-            if receiving_job_id is None:
-                boxes_to_draw = find_unknown_regions(
-                    frame, background_reference, known_boxes + qr_boxes
-                )
-            else:
-                mixed_order, references = self._receiving_service.unknown_references(
-                    receiving_job_id
-                )
-                if references:
-                    regions = find_unknown_regions(
-                        frame,
-                        background_reference,
-                        known_boxes + qr_boxes if mixed_order else qr_boxes,
-                    )
-                    candidates = [
-                        describe_object(frame[y : y + height, x : x + width])
-                        for x, y, width, height in regions
-                    ]
-                    matched = match_objects(references, candidates)
-                    boxes_to_draw = [regions[index] for index in sorted(matched)]
-                    label = "Unknown match"
+        if background_reference is not None and receiving_job_id is None:
+            boxes_to_draw = find_unknown_regions(
+                frame, background_reference, known_boxes + qr_boxes
+            )
             counts[UNKNOWN_LABEL] = len(boxes_to_draw)
             for x, y, width, height in boxes_to_draw:
-                detections.append(DetectionBox(x, y, x + width, y + height, label))
+                detections.append(DetectionBox(x, y, x + width, y + height, UNKNOWN_LABEL))
         return CameraFrameResult(frame, detections, counts)
 
     def _publish(self, result: CameraFrameResult) -> None:
@@ -2062,7 +2038,8 @@ class CameraService:
             if receiving_job_id is not None and self._running and not self._event_saved:
                 def save_inspection(labels: dict[str, int], queue_id: int) -> None:
                     event = self._event_store.create(
-                        result.jpeg, labels, sum(labels.values()), queue_id=queue_id
+                        result.jpeg, labels, sum(labels.values()), queue_id=queue_id,
+                        review_photo=self._state["review_capture"],
                     )
                     self._event_saved = True
                     self._state["last_event_id"] = event["id"]
@@ -2095,13 +2072,14 @@ class CameraService:
             if not self._running:
                 raise RuntimeError("กรุณาเริ่มกล้องก่อนส่งภาพ")
             active_session = self._state["session_id"]
+            review_capture = self._state["review_capture"]
             if session_id is not None and session_id != active_session:
                 raise ValueError("รอบการตรวจด้วยกล้องจบแล้ว")
         frame = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
         if frame is None:
             raise ValueError("ไฟล์ภาพจากกล้องไม่ถูกต้อง")
         started = time.perf_counter()
-        result = self._detect(frame)
+        result = CameraFrameResult(frame, [], {}) if review_capture else self._detect(frame)
         with self._lock:
             if self._state["session_id"] != active_session:
                 raise ValueError("รอบการตรวจด้วยกล้องจบแล้ว")

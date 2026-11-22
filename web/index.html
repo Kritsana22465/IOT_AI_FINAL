@@ -188,7 +188,7 @@
     .history-title { font-weight: 700; }
     .history-time { margin-top: 3px; }
     .history-status { font-size: 12px; color: var(--muted); text-align: right; }
-    .history-status.waiting_ir, .history-status.in_progress { color: #087d83; }
+    .history-status.waiting_ir, .history-status.in_progress, .history-status.awaiting_review { color: #087d83; }
     .history-status.completed { color: var(--green); }
     .history-status.rejected, .history-status.not_found, .history-status.incomplete, .history-status.interrupted, .history-status.cancelled { color: var(--red); }
     .history-detail { padding: 0 0 16px; }
@@ -316,7 +316,7 @@
             </details>
           </div>
           <p class="tiny" id="background-status" style="padding: 0 20px 16px">
-            ตั้งฉากหลังว่างก่อนใช้งาน Unknown
+            ตั้งฉากหลังว่างสำหรับโหมดทดสอบกล้อง
           </p>
         </section>
         <section class="panel queue-panel">
@@ -424,7 +424,9 @@
         byId("camera-overlay").hidden = true;
       }
       byId("camera-caption").textContent = cameraRunning
-        ? (camera.receiving_job_id
+        ? (camera.review_capture
+          ? "กำลังถ่ายรูปคิว Unknown"
+          : camera.receiving_job_id
           ? `กำลังตรวจสอบคิวล่าสุด · พบ ${camera.total} รายการ`
           : cameraTestMode
             ? `โหมดทดสอบ · ไม่บันทึกประวัติ · พบ ${camera.total} รายการ`
@@ -433,7 +435,9 @@
       byId("video-message").textContent = camera.error
         || (camera.capture_completed
           ? "บันทึกประวัติแล้ว กำลังปิดกล้อง"
-          : camera.receiving_job_id
+          : camera.review_capture
+            ? "จะส่งภาพแรกให้ทีมตรวจ Unknown"
+            : camera.receiving_job_id
             ? "เปิดกล้องรอจนรายการครบ · จะบันทึกรูปและปิดกล้องเมื่อครบ"
           : cameraTestMode
             ? camera.background_ready
@@ -505,18 +509,12 @@
         if (!irDetected && job.fallback_in_seconds > 0) {
           message = `ARMbot วางของแล้ว · รอ IR อีก ${job.fallback_in_seconds} วินาที`;
         } else if (!irDetected && job.fallback_in_seconds === 0) {
-          message = job.progress?.Unknown && !camera.background_ready
-            ? "รอบันทึกฉากหลังว่างก่อนตรวจสำรอง"
-            : "กำลังเตรียมกล้องเพื่อตรวจสำรอง";
+          message = "กำลังเตรียมกล้องเพื่อตรวจสำรอง";
         } else if (!arduino.ir_ready) message = "รอสัญญาณจากเซนเซอร์แท่นวาง";
         else if (!arduino.object_present) message = "รอวางอุปกรณ์บนแท่น";
         else if (!arduino.capture_pending && !job.replaces_active_queue) message = "นำอุปกรณ์เดิมออกจากแท่นก่อนเริ่มรอบใหม่";
-        else if (!camera.background_ready) message = "รอบันทึกฉากหลังว่างก่อนเปิดกล้องตรวจ";
+        else if (!camera.background_ready && !job.needs_review_photo) message = "รอบันทึกฉากหลังว่างก่อนเปิดกล้องตรวจ";
         else message = "พบอุปกรณ์บนแท่น · กำลังเตรียมกล้อง";
-      } else if (job.progress?.Unknown && job.progress.Unknown.detected < job.progress.Unknown.requested) {
-        message = (job.unknown_reference_count || 0) < job.progress.Unknown.requested
-          ? "รอภาพอ้างอิงที่ใช้ตรวจได้จาก ARMbot"
-          : "กำลังเทียบภาพอุปกรณ์ · ผลตรวจยังไม่ครบ";
       }
       const status = byId("active-queue-message");
       if (status.textContent !== message) status.textContent = message;
@@ -598,7 +596,7 @@
         || !camera.receiving_job_id
         || !job
         || job.job_id !== camera.receiving_job_id
-        || !["completed", "not_found", "incomplete"].includes(job.status)
+        || !["completed", "not_found", "incomplete", "awaiting_review"].includes(job.status)
       ) return;
       receivingCameraStopInFlight = true;
       try {
@@ -820,7 +818,7 @@
       const irDetected = arduino.ir_ready && arduino.object_present;
       const fallback = !irDetected && job.fallback_in_seconds === 0;
       if (!irDetected && !fallback) return;
-      if (!camera.background_ready && (!fallback || job.progress?.Unknown)) return;
+      if (!camera.background_ready && !fallback && !job.needs_review_photo) return;
       const requestId = irDetected && arduino.capture_pending && arduino.capture_request_id !== lastCaptureRequestId
         ? arduino.capture_request_id
         : null;
@@ -856,6 +854,7 @@
       completed: "ยืนยันรับแล้ว",
       cancelled: "ยกเลิกแล้ว",
       superseded: "มีคิวใหม่มาแทน",
+      awaiting_review: "รอทีมตรวจ Unknown",
       not_found: "ไม่พบอุปกรณ์",
       incomplete: "ตรวจไม่ครบ",
       rejected: "คิวไม่ถูกเริ่ม",
@@ -967,7 +966,9 @@
         const items = document.createElement("ul");
         for (const [name, quantity] of Object.entries(queue.requested)) {
           const item = document.createElement("li");
-          item.textContent = `${name} · ตรวจพบ ${queue.detected[name] || 0}/${quantity} ชิ้น`;
+          item.textContent = queue.status === "awaiting_review"
+            ? `${name} × ${quantity}`
+            : `${name} · ตรวจพบ ${queue.detected[name] || 0}/${quantity} ชิ้น`;
           items.append(item);
         }
         const gallery = historyElement("div", "history-photos");
@@ -975,7 +976,8 @@
           addHistoryPhoto(gallery, url, `รูปตอนหยิบจาก ARMbot · ${index + 1}`);
         });
         if (queue.inspection_image) {
-          addHistoryPhoto(gallery, queue.inspection_image, `รูปยืนยันการรับ · ${formatEventTime(queue.detected_at)}`);
+          const caption = queue.status === "awaiting_review" ? "รูปสำหรับส่งตรวจ" : "รูปยืนยันการรับ";
+          addHistoryPhoto(gallery, queue.inspection_image, `${caption} · ${formatEventTime(queue.detected_at)}`);
         }
         row.detail.replaceChildren(identity, message);
         if (items.childElementCount) row.detail.append(items);
