@@ -38,7 +38,7 @@ services:
       MQTT_PASSWORD: ${MQTT_PASSWORD:-}
       MQTT_QUEUE_TOPIC: ${MQTT_QUEUE_TOPIC:-armbot-010eb21b/cmd/queue}
       MQTT_EVENT_TOPIC: ${MQTT_EVENT_TOPIC:-armbot-010eb21b/event}
-      MQTT_STATUS_TOPIC: ${MQTT_STATUS_TOPIC:-armbot-010eb21b/status}
+      MQTT_STATUS_TOPIC: ${MQTT_STATUS_TOPIC:-}
       MQTT_RESULT_TOPIC: ${MQTT_RESULT_TOPIC:-}
     ports:
       - "8000:8000"

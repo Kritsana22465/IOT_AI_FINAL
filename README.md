@@ -35,7 +35,7 @@ docker compose up --build
 
 ## ตั้งค่า Arduino
 
-แก้ค่าก่อน Upload ในไฟล์ `Project_IoT.ino`:
+แก้ค่าก่อน Upload ในไฟล์ `firmware/Project_IoT.ino`:
 
 ```cpp
 const char WIFI_SSID[] = "ชื่อ Wi-Fi";
@@ -48,13 +48,31 @@ const char API_KEY[] = "ค่าเดียวกับ ARDUINO_API_KEY";
 
 อย่า commit ค่า Wi-Fi หรือ API key จริงลง GitHub
 
+### Buzzer
+
+ใช้ขา D5 เป็นสัญญาณของ Buzzer และต่อ GND ร่วมกับ Arduino ถ้าใช้โมดูลแบบมีขา
+VCC ให้จ่ายไฟตามพิกัดของโมดูล หากใช้ Buzzer สองขาที่กินกระแสเกิน 8 mA ให้ต่อผ่าน
+วงจรขับ แล้วใช้ D5 ควบคุมวงจรขับ
+
+- ค่าเริ่มต้นใช้ Active Buzzer แบบ HIGH trigger ถ้าโมดูลเป็น LOW trigger ให้ตั้ง `BUZZER_ACTIVE_HIGH` เป็น `false`
+- ถ้าเป็น Passive Buzzer ให้ตั้ง `BUZZER_IS_ACTIVE` เป็น `false`
+- ตอนมีคิวรอและแท่นว่าง จะดังสั้น 150 ms ทุก 1.5 วินาที พอ IR พบของจะหยุดเสียงสั้น
+- หลัง Dashboard ตรวจครบและบันทึกรูปสำเร็จ จะดังยาว 1 วินาทีหนึ่งครั้ง แล้วเงียบจนกว่าจะมีคิวถัดไป
+
+อัปเดต Dashboard และอัปโหลดเฟิร์มแวร์รุ่นนี้ด้วยกัน Arduino รับสถานะจากการส่ง IR รอบเดิม
+จึงอาจใช้เวลาถึงรอบส่งถัดไปประมาณ 3 วินาทีจึงเริ่มส่งเสียง
+
 ## รับรายการอุปกรณ์ผ่าน MQTT
 
 Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ่าน WebSocket + TLS โดยใช้ prefix `armbot-010eb21b` และ subscribe
 `armbot-010eb21b/cmd/queue` เพื่อรับรายการที่กำลังจะหยิบ จากนั้น publish event ไปที่
-`armbot-010eb21b/event` และ publish retained status ไปที่ `armbot-010eb21b/status` สามารถกำหนด
+`armbot-010eb21b/event` และ publish retained status ไปที่ `armbot-010eb21b/inspection/status` สามารถกำหนด
 `MQTT_HOST`, `MQTT_PORT`, `MQTT_QUEUE_TOPIC`, `MQTT_EVENT_TOPIC`,
 `MQTT_STATUS_TOPIC`
+
+Dashboard รับสถานะยกเลิกจาก `armbot-010eb21b/status` เมื่อ ARMbot ยืนยันว่า
+คิวเดียวกันถูกยกเลิก Dashboard จะหยุดรอ ปิดกล้องถ้ากำลังตรวจ และเก็บคิวไว้ในประวัติว่า
+“ยกเลิกแล้ว” การเปิดกล้องตรวจยังเริ่มจาก IR ตามเดิม
 ผ่าน environment variables
 
 ตัวอย่างส่งคำขอ:

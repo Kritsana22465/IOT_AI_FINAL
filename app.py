@@ -99,8 +99,11 @@ MQTT_USERNAME = os.getenv("MQTT_USERNAME", "").strip()
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 MQTT_QUEUE_TOPIC = os.getenv("MQTT_QUEUE_TOPIC", "armbot-010eb21b/cmd/queue").strip()
 MQTT_EVENT_TOPIC = os.getenv("MQTT_EVENT_TOPIC", "armbot-010eb21b/event").strip()
-MQTT_STATUS_TOPIC = os.getenv("MQTT_STATUS_TOPIC", "armbot-010eb21b/status").strip()
 MQTT_ARMBOT_PREFIX = MQTT_QUEUE_TOPIC.rsplit("/cmd/", 1)[0]
+MQTT_ARMBOT_STATUS_TOPIC = f"{MQTT_ARMBOT_PREFIX}/status"
+MQTT_STATUS_TOPIC = os.getenv("MQTT_STATUS_TOPIC", "").strip()
+if not MQTT_STATUS_TOPIC or MQTT_STATUS_TOPIC == MQTT_ARMBOT_STATUS_TOPIC:
+    MQTT_STATUS_TOPIC = f"{MQTT_ARMBOT_PREFIX}/inspection/status"
 MQTT_RESULT_TOPIC = (
     os.getenv("MQTT_RESULT_TOPIC", "").strip() or f"{MQTT_ARMBOT_PREFIX}/inspection/result"
 )
@@ -464,6 +467,17 @@ class EventStore:
                 (before_id, before_id, limit),
             ).fetchall()
 
+    def latest_completed_queue_id(self) -> int:
+        with self.connection() as connection:
+            row = connection.execute(
+                """
+                SELECT id FROM receiving_history
+                WHERE status = 'completed'
+                ORDER BY id DESC LIMIT 1
+                """
+            ).fetchone()
+        return row["id"] if row is not None else 0
+
     def get_queue(self, queue_id: int) -> dict[str, Any] | None:
         with self.connection() as connection:
             row = connection.execute(
@@ -621,9 +635,12 @@ class MqttReceivingService:
         self._lock = threading.RLock()
         self._client: mqtt.Client | None = None
         self._job: dict[str, Any] | None = None
+        self._last_completed_queue_id = 0
         self.on_queue_replaced: Callable[[str], None] | None = None
-        self._replaced_legacy_unknown_sources: deque[str] = deque(maxlen=100)
-        self._seen_unknown_acks: deque[tuple[int, float]] = deque(maxlen=100)
+        self.on_armbot_cancelled: Callable[[int], None] | None = None
+        self._replaced_legacy_armbot_keys: deque[tuple[str, str]] = deque(maxlen=100)
+        self._seen_armbot_acks: deque[tuple[int, float]] = deque(maxlen=100)
+        self._armbot_cancelled_jobs: list[dict[str, Any]] = []
         self._unknown_image_info: tuple[float, dict[str, Any]] | None = None
         self._unknown_references: dict[
             tuple[str, float], ObjectSignature
@@ -637,6 +654,14 @@ class MqttReceivingService:
         self._results_ready = threading.Event()
         self._results_stop = threading.Event()
         self._results_worker: threading.Thread | None = None
+
+    def load(self) -> None:
+        self._last_completed_queue_id = self._event_store.latest_completed_queue_id()
+
+    def buzzer_state(self) -> tuple[bool, int]:
+        with self._lock:
+            waiting = self._job is not None and self._job["status"] == "waiting_ir"
+            return waiting, self._last_completed_queue_id
 
     def start(self) -> None:
         if not all(
@@ -652,7 +677,8 @@ class MqttReceivingService:
         if (
             MQTT_RESULT_TOPIC in (
                 MQTT_QUEUE_TOPIC, MQTT_EVENT_TOPIC, MQTT_STATUS_TOPIC,
-                MQTT_ARMBOT_EVENT_TOPIC, MQTT_UNKNOWN_TOPIC, MQTT_UNKNOWN_IMAGE_TOPIC,
+                MQTT_ARMBOT_EVENT_TOPIC, MQTT_ARMBOT_STATUS_TOPIC, MQTT_UNKNOWN_TOPIC,
+                MQTT_UNKNOWN_IMAGE_TOPIC,
             )
             or MQTT_RESULT_TOPIC.startswith(f"{MQTT_ARMBOT_PREFIX}/cmd/")
             or any(character in MQTT_RESULT_TOPIC for character in ("#", "+", "\0"))
@@ -845,6 +871,7 @@ class MqttReceivingService:
             )
             if complete:
                 save_result(detected, job["history_id"])
+                self._last_completed_queue_id = job["history_id"]
                 job.update(
                     status="completed", message="รับของเรียบร้อย",
                     success=True, detected=detected,
@@ -930,6 +957,7 @@ class MqttReceivingService:
             [
                 (MQTT_QUEUE_TOPIC, 1),
                 (MQTT_ARMBOT_EVENT_TOPIC, 1),
+                (MQTT_ARMBOT_STATUS_TOPIC, 1),
                 (MQTT_UNKNOWN_TOPIC, 1),
                 (MQTT_UNKNOWN_IMAGE_TOPIC, 0),
             ]
@@ -956,7 +984,7 @@ class MqttReceivingService:
         with self._lock:
             self._mqtt_connected = False
             self._unknown_image_info = None
-            self._replaced_legacy_unknown_sources.clear()
+            self._replaced_legacy_armbot_keys.clear()
             if reason_code != 0:
                 self._mqtt_error = f"MQTT disconnected: {reason_code}"
                 LOGGER.warning(self._mqtt_error)
@@ -978,6 +1006,9 @@ class MqttReceivingService:
             LOGGER.exception("Could not persist a receiving update from %s", message.topic)
 
     def _handle_message(self, message: mqtt.MQTTMessage) -> None:
+        if message.topic == MQTT_ARMBOT_STATUS_TOPIC:
+            self._receive_armbot_status(message.payload)
+            return
         if message.topic == MQTT_UNKNOWN_IMAGE_TOPIC:
             if not message.retain:
                 self._receive_unknown_image(message.payload)
@@ -985,6 +1016,8 @@ class MqttReceivingService:
         if message.topic != MQTT_QUEUE_TOPIC:
             if not message.retain:
                 self._receive_armbot_message(message.topic, message.payload)
+                if message.topic == MQTT_ARMBOT_EVENT_TOPIC:
+                    self._sync_armbot_cancellation()
             return
         payload: Any = None
         try:
@@ -1089,6 +1122,45 @@ class MqttReceivingService:
         job_id = payload.get("armbot_job_id")
         return str(job_id) if type(job_id) is int else None
 
+    def _receive_armbot_status(self, raw: bytes) -> None:
+        if len(raw) > 256 * 1024:
+            return
+        try:
+            payload = json.loads(raw)
+        except (ValueError, UnicodeError):
+            return
+        jobs = payload.get("jobs") if isinstance(payload, dict) else None
+        if not isinstance(jobs, list):
+            return
+        with self._lock:
+            self._armbot_cancelled_jobs = [
+                job for job in jobs
+                if isinstance(job, dict) and job.get("state") == "cancelled"
+            ]
+        self._sync_armbot_cancellation()
+
+    def _sync_armbot_cancellation(self) -> None:
+        with self._lock:
+            job = self._job
+            if job is None or job["status"] not in ("waiting_ir", "in_progress"):
+                return
+            for robot_job in self._armbot_cancelled_jobs:
+                arm_id = robot_job.get("id")
+                ref = robot_job.get("ref")
+                if ref == job["job_id"] or (
+                    ref is None
+                    and job["armbot_created_at"] is not None
+                    and robot_job.get("created") == job["armbot_created_at"]
+                    and type(arm_id) is int
+                    and str(arm_id) == job["armbot_job_id"]
+                ):
+                    break
+            else:
+                return
+            history_id = job["history_id"]
+        if self.on_armbot_cancelled is not None:
+            self.on_armbot_cancelled(history_id)
+
     def _receive_armbot_message(self, topic: str, raw: bytes) -> None:
         if topic not in (MQTT_ARMBOT_EVENT_TOPIC, MQTT_UNKNOWN_TOPIC) or len(raw) > 8192:
             return
@@ -1110,7 +1182,11 @@ class MqttReceivingService:
             return
         # ARMbot's acknowledgment contains a nested job. Our own queue events don't.
         robot_job = payload.get("job")
-        if not isinstance(robot_job, dict) or robot_job.get("item_id") != "unknown":
+        if not isinstance(robot_job, dict):
+            return
+        item_id = robot_job.get("item_id")
+        model_class = ITEM_TO_YOLO_CLASS.get(item_id) if isinstance(item_id, str) else None
+        if model_class is None:
             return
         arm_id = robot_job.get("id")
         source = robot_job.get("source")
@@ -1126,56 +1202,72 @@ class MqttReceivingService:
         ref = payload.get("job_id") or robot_job.get("ref")
         if ref is not None and (not isinstance(ref, str) or not ref.strip() or len(ref) > 100):
             return
+        created = robot_job.get("created")
+        if type(created) not in (int, float) or not 0 < created < math.inf:
+            created = None
+        ack_key = (arm_id, created) if created is not None else None
         with self._lock:
-            created = robot_job.get("created")
-            if type(created) in (int, float) and 0 < created < math.inf:
-                ack_key = (arm_id, created)
-                if ack_key in self._seen_unknown_acks:
-                    return
-                self._seen_unknown_acks.append(ack_key)
-            if ref is None and source in self._replaced_legacy_unknown_sources:
+            if ack_key is not None and ack_key in self._seen_armbot_acks:
+                return
+            legacy_key = (source, model_class)
+            if ref is None and legacy_key in self._replaced_legacy_armbot_keys:
                 # ARMbot emits unkeyed acknowledgments in command order.
-                self._replaced_legacy_unknown_sources.remove(source)
+                self._replaced_legacy_armbot_keys.remove(legacy_key)
+                if ack_key is not None:
+                    self._seen_armbot_acks.append(ack_key)
                 return
             job = self._job
             if job is not None:
-                if job.get("armbot_job_id") == str(arm_id):
+                if job["armbot_job_id"] == str(arm_id) and job["armbot_created_at"] == created:
                     return
                 if job["status"] in ("waiting_ir", "in_progress"):
-                    if (
-                        UNKNOWN_LABEL in job["requested"]
-                        and job["source"] == source
-                        and job.get("armbot_job_id") is None
-                        and (job["legacy_job_id"] if ref is None else job["job_id"] == ref)
+                    matches_ref = ref == job["job_id"] if ref is not None else (
+                        job["legacy_job_id"] and job["source"] == source
+                        and ITEM_TO_YOLO_CLASS.get(job["item_id"]) == model_class
+                    )
+                    if matches_ref and job["armbot_created_at"] is None and (
+                        job["armbot_job_id"] in (None, str(arm_id))
                     ):
-                        requested = dict(job["requested"])
-                        if len(job["requested"]) == 1:
-                            requested[UNKNOWN_LABEL] = count
-                        updated = {
-                            **job, "requested": requested, "armbot_job_id": str(arm_id),
-                        }
-                        self._event_store.save_pick_images(
-                            job["history_id"],
-                            [
-                                (stamp, image)
-                                for (pending_arm_id, stamp), image in self._pending_pick_images.items()
-                                if pending_arm_id == str(arm_id)
-                            ],
-                        )
-                        self._event_store.update_queue(updated)
-                        job.update(updated)
-                        self._pending_pick_images.clear()
-                        self._unknown_references = {
-                            key: value
-                            for key, value in self._unknown_references.items()
-                            if key[0] == str(arm_id)
-                        }
+                        self._bind_armbot_job(job, str(arm_id), created, count)
+                        if ack_key is not None:
+                            self._seen_armbot_acks.append(ack_key)
                     return
+        if model_class != "unknown":
+            return
         request = ReceivingRequest(
             job_id=ref or f"armbot-unknown-{arm_id}-{uuid.uuid4().hex}",
             items=[ReceivingItem(**{"class": "unknown", "quantity": count})],
         )
-        self.submit(request, item_id="unknown", source=source, armbot_job_id=str(arm_id))
+        self.submit(
+            request, item_id="unknown", source=source, armbot_job_id=str(arm_id),
+            armbot_created_at=created,
+        )
+        if ack_key is not None:
+            with self._lock:
+                self._seen_armbot_acks.append(ack_key)
+
+    def _bind_armbot_job(
+        self, job: dict[str, Any], arm_id: str, created: float | None, count: int
+    ) -> None:
+        updated = {**job, "armbot_job_id": arm_id, "armbot_created_at": created}
+        if UNKNOWN_LABEL in job["requested"]:
+            if len(job["requested"]) == 1:
+                updated["requested"] = {UNKNOWN_LABEL: count}
+            self._event_store.save_pick_images(
+                job["history_id"],
+                [
+                    (stamp, image)
+                    for (pending_arm_id, stamp), image in self._pending_pick_images.items()
+                    if pending_arm_id == arm_id
+                ],
+            )
+        self._event_store.update_queue(updated)
+        job.update(updated)
+        if UNKNOWN_LABEL in job["requested"]:
+            self._pending_pick_images.clear()
+            self._unknown_references = {
+                key: value for key, value in self._unknown_references.items() if key[0] == arm_id
+            }
 
     def _receive_unknown_image(self, raw: bytes) -> None:
         with self._lock:
@@ -1266,6 +1358,7 @@ class MqttReceivingService:
         item_id: str | None = None,
         source: str = "mqtt",
         armbot_job_id: str | None = None,
+        armbot_created_at: float | None = None,
         legacy_job_id: bool = False,
     ) -> None:
         requested: dict[str, int] = {}
@@ -1280,6 +1373,7 @@ class MqttReceivingService:
             "item_id": item_id,
             "source": source,
             "armbot_job_id": armbot_job_id,
+            "armbot_created_at": armbot_created_at,
             "legacy_job_id": legacy_job_id,
             "success": False,
             "message": "รอ IR ตรวจพบอุปกรณ์",
@@ -1314,11 +1408,9 @@ class MqttReceivingService:
             if history_id is None:
                 return
             if replaces_active_queue:
-                if (
-                    job["legacy_job_id"] and UNKNOWN_LABEL in job["requested"]
-                    and job.get("armbot_job_id") is None
-                ):
-                    self._replaced_legacy_unknown_sources.append(job["source"])
+                model_class = ITEM_TO_YOLO_CLASS.get(job["item_id"])
+                if job["legacy_job_id"] and model_class and job["armbot_created_at"] is None:
+                    self._replaced_legacy_armbot_keys.append((job["source"], model_class))
                 self._publish_event(
                     {
                         "type": "superseded",
@@ -1338,6 +1430,7 @@ class MqttReceivingService:
         # Camera operations can acquire the receiving lock, so notify after releasing it.
         if job is not None and self.on_queue_replaced is not None:
             self.on_queue_replaced(job["job_id"])
+        self._sync_armbot_cancellation()
 
     def _job_snapshot_locked(self) -> dict[str, Any] | None:
         if self._job is None:
@@ -2146,12 +2239,32 @@ arduino = ArduinoWifi(event_store)
 browser_frame_gate = threading.Lock()
 
 
+def _cancel_receiving(history_id: int, reason: str) -> dict[str, Any]:
+    sensor = arduino.state()
+    job = camera.cancel_receiving(history_id, reason)
+    if sensor["capture_pending"] and sensor["capture_request_id"]:
+        arduino.acknowledge_capture(sensor["capture_request_id"])
+    return job
+
+
+def _cancel_from_armbot(history_id: int) -> None:
+    try:
+        _cancel_receiving(history_id, "ARMbot ยกเลิกคิว")
+    except ValueError:
+        # The queue may have changed while waiting for the camera lock.
+        return
+
+
+receiving.on_armbot_cancelled = _cancel_from_armbot
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     last_error: Exception | None = None
     for attempt in range(10):
         try:
             event_store.initialize()
+            receiving.load()
             arduino.load()
             last_error = None
             break
@@ -2285,13 +2398,10 @@ def receiving_history_detail(queue_id: int, response: Response) -> dict[str, Any
 
 @app.post("/api/receiving-history/{queue_id}/cancel")
 def cancel_receiving_queue(queue_id: int, request: CancelQueueRequest) -> dict[str, Any]:
-    sensor = arduino.state()
     try:
-        job = camera.cancel_receiving(queue_id, request.reason.strip())
+        job = _cancel_receiving(queue_id, request.reason.strip())
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    if sensor["capture_pending"] and sensor["capture_request_id"]:
-        arduino.acknowledge_capture(sensor["capture_request_id"])
     return {"job": job, "camera": camera.state()}
 
 
@@ -2344,10 +2454,15 @@ def acknowledge_capture(request: CaptureAckRequest) -> dict[str, Any]:
 @app.post("/api/arduino/ir")
 def receive_arduino_ir(
     request: IRSensorRequest,
+    response: Response,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> dict[str, Any]:
     if ARDUINO_API_KEY and not x_api_key:
         raise HTTPException(status_code=401, detail="ต้องระบุ X-API-Key")
     if ARDUINO_API_KEY and not secrets.compare_digest(x_api_key or "", ARDUINO_API_KEY):
         raise HTTPException(status_code=403, detail="X-API-Key ไม่ถูกต้อง")
-    return arduino.receive_ir(request.object_present)
+    sensor_state = arduino.receive_ir(request.object_present)
+    waiting, completed_queue_id = receiving.buzzer_state()
+    response.headers["X-IoT-Queue-Waiting"] = "1" if waiting else "0"
+    response.headers["X-IoT-Completed-Queue"] = str(completed_queue_id)
+    return sensor_state
