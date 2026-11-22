@@ -174,15 +174,19 @@
     .queue-panel { margin-top: 16px; }
     .history-list { padding: 0 20px; }
     .history-empty { color: var(--muted); padding: 18px 0; }
-    .history-entry { border-bottom: 1px solid var(--line); }
+    .history-entry {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px;
+      align-items: start; border-bottom: 1px solid var(--line);
+    }
     .history-entry:last-child { border-bottom: 0; }
+    .history-scan { margin-top: 10px; padding: 6px 10px; font-size: 12px; white-space: nowrap; }
     .history-entry summary {
       display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center;
       gap: 12px; padding: 14px 0; cursor: pointer; list-style: none;
     }
     .history-entry summary::-webkit-details-marker { display: none; }
     .history-entry summary::after { content: "＋"; color: var(--muted); }
-    .history-entry[open] summary::after { content: "−"; }
+    .history-entry details[open] summary::after { content: "−"; }
     .history-entry summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
     .history-title, .history-time { display: block; overflow-wrap: anywhere; }
     .history-title { font-weight: 700; }
@@ -323,7 +327,7 @@
           <div class="panel-head">
             <div>
               <h2>ประวัติคิวรับอุปกรณ์</h2>
-              <p class="tiny">กดที่คิวเพื่อดูรายการ รูป และผลตรวจรับ</p>
+              <p class="tiny">กดที่คิวเพื่อดูผลเดิม หรือกดตรวจอุปกรณ์เพื่อเปิดกล้องด้วยตนเอง</p>
             </div>
           </div>
           <div id="history-list" class="history-list">
@@ -349,6 +353,7 @@
     let frameTimer = null;
     let frameInFlight = false;
     let captureRequestInFlight = false;
+    let manualScanInFlight = false;
     let lastCaptureRequestId = null;
     let captureRetry = null;
     let captureClosing = false;
@@ -485,7 +490,10 @@
     function renderStatus(data) {
       renderCamera(data.camera);
       renderArduino(data.arduino);
-      renderActiveQueue(data.receiving?.job, data.arduino, data.camera);
+      const manualJob = data.receiving?.manual_job;
+      const displayedJob = manualJob && manualJob.job_id === data.camera.receiving_job_id
+        ? manualJob : data.receiving?.job;
+      renderActiveQueue(displayedJob, data.arduino, data.camera);
       maybeStopReceivingCamera(data.camera, data.receiving);
       maybeStartTriggeredCapture(data.arduino, data.receiving, data.camera);
       const online = data.camera.running || data.arduino.connected;
@@ -500,7 +508,8 @@
     function renderActiveQueue(job, arduino, camera) {
       const active = job && ["waiting_ir", "in_progress"].includes(job.status);
       byId("active-queue").hidden = !active;
-      activeQueueId = active ? job.history_id : null;
+      activeQueueId = active && !job.parent_queue_id ? job.history_id : null;
+      byId("cancel-queue-button").hidden = !activeQueueId;
       byId("cancel-queue-button").disabled = cancelInFlight;
       if (!active) return;
       let message = job.message;
@@ -590,7 +599,8 @@
     }
 
     async function maybeStopReceivingCamera(camera, receiving) {
-      const job = receiving?.job;
+      const job = [receiving?.job, receiving?.manual_job]
+        .find((candidate) => candidate && candidate.job_id === camera.receiving_job_id);
       if (
         receivingCameraStopInFlight
         || !camera.receiving_job_id
@@ -721,7 +731,8 @@
       triggerId = null,
       recordEvents = false,
       receiveJobId = null,
-      fallback = false
+      fallback = false,
+      manualQueueId = null
     ) {
       const deviceId = byId("camera-select").value || selectedCameraId;
       const cameraState = await request("/api/camera/start", {
@@ -733,6 +744,7 @@
           trigger_id: triggerId,
           record_events: recordEvents,
           receive_job_id: receiveJobId,
+          manual_queue_id: manualQueueId,
           fallback
         })
       });
@@ -766,7 +778,7 @@
         await video.play();
         if (browserSessionId !== cameraState.session_id) return false;
         cameraRunning = true;
-        cameraTestMode = !recordEvents && !receiveJobId;
+        cameraTestMode = !recordEvents && !cameraState.receiving_job_id;
         await refreshCameraList(deviceId);
         if (browserSessionId !== cameraState.session_id) return false;
         frameTimer = setInterval(sendCameraFrame, 700);
@@ -823,7 +835,7 @@
         ? arduino.capture_request_id
         : null;
       if (!fallback && !requestId && !job.replaces_active_queue) return;
-      if (cancelInFlight || captureRequestInFlight) return;
+      if (cancelInFlight || captureRequestInFlight || manualScanInFlight) return;
       if (captureRetry?.jobId === job.job_id && captureRetry.fallback === fallback
           && Date.now() < captureRetry.until) return;
       captureRequestInFlight = true;
@@ -869,21 +881,49 @@
     }
 
     function createHistoryRow(id) {
-      const element = historyElement("details", "history-entry");
+      const element = historyElement("div", "history-entry");
+      const details = document.createElement("details");
       const summary = document.createElement("summary");
       const description = document.createElement("span");
       const title = historyElement("span", "history-title");
       const time = historyElement("time", "history-time tiny");
       const status = historyElement("span", "history-status");
       const detail = historyElement("div", "history-detail");
+      const scan = historyElement("button", "secondary history-scan", "ตรวจอุปกรณ์");
+      scan.type = "button";
       description.append(title, time);
       summary.append(description, status);
-      element.append(summary, detail);
-      const row = { id, element, title, time, status, detail };
-      element.addEventListener("toggle", () => {
-        if (element.open && row.loadedVersion !== row.version) loadQueueDetail(row);
+      details.append(summary, detail);
+      element.append(details, scan);
+      const row = { id, element, details, title, time, status, detail, scan };
+      details.addEventListener("toggle", () => {
+        if (details.open && row.loadedVersion !== row.version) loadQueueDetail(row);
       });
+      scan.addEventListener("click", () => scanHistoryQueue(row));
       return row;
+    }
+
+    async function scanHistoryQueue(row) {
+      if (manualScanInFlight || captureRequestInFlight) {
+        showError("กำลังเปิดกล้อง กรุณารอสักครู่");
+        return;
+      }
+      manualScanInFlight = true;
+      row.scan.disabled = true;
+      try {
+        if (cameraRunning) {
+          if (!cameraTestMode) throw new Error("กรุณาจบรอบตรวจที่กำลังเปิดกล้องอยู่ก่อน");
+          await stopBrowserCamera();
+        }
+        byId("video-frame").scrollIntoView({ block: "center" });
+        await startBrowserCamera(null, false, null, false, row.id);
+      } catch (error) {
+        showError(`เริ่มตรวจอุปกรณ์ไม่ได้: ${error.message}`);
+      } finally {
+        manualScanInFlight = false;
+        row.scan.disabled = false;
+        await refreshStatus();
+      }
     }
 
     function renderHistory(queues) {
@@ -907,14 +947,16 @@
         row.title.textContent = labelsText(queue.requested);
         row.time.dateTime = queue.received_at;
         const shortCode = queue.job_id.length > 14 ? `${queue.job_id.slice(0, 10)}…` : queue.job_id;
-        row.time.textContent = `${formatEventTime(queue.received_at)} · คิว ${shortCode}`;
+        const reference = queue.parent_queue_id ? `ตรวจซ้ำจากคิว #${queue.parent_queue_id}` : `คิว ${shortCode}`;
+        row.time.textContent = `${formatEventTime(queue.received_at)} · ${reference}`;
         row.time.title = queue.job_id;
+        row.scan.setAttribute("aria-label", `ตรวจอุปกรณ์คิว ${queue.job_id}`);
         row.status.className = `history-status ${queue.status}`;
         row.status.textContent = queueStatusLabels[queue.status];
         if (list.children[index] !== row.element) {
           list.insertBefore(row.element, list.children[index] || null);
         }
-        if (row.element.open && row.loadedVersion !== row.version) loadQueueDetail(row);
+        if (row.details.open && row.loadedVersion !== row.version) loadQueueDetail(row);
       });
     }
 

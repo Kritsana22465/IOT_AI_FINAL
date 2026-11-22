@@ -130,6 +130,7 @@ class CameraRequest(BaseModel):
     record_events: bool = True
     receive_job_id: str | None = Field(default=None, max_length=100)
     fallback: bool = False
+    manual_queue_id: int | None = Field(default=None, ge=1)
 
 
 class IRSensorRequest(BaseModel):
@@ -226,6 +227,12 @@ class EventStore:
                 """
                 ALTER TABLE receiving_history
                 ADD COLUMN IF NOT EXISTS mqtt_result_pending BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            connection.execute(
+                """
+                ALTER TABLE receiving_history
+                ADD COLUMN IF NOT EXISTS parent_queue_id BIGINT REFERENCES receiving_history(id)
                 """
             )
             connection.execute(
@@ -347,13 +354,14 @@ class EventStore:
                         UPDATE receiving_history
                         SET event_id = %s, detected = %s, status = %s,
                             message = %s, updated_at = NOW(),
-                            mqtt_result_pending = TRUE
+                            mqtt_result_pending = (parent_queue_id IS NULL OR %s)
                         WHERE id = %s AND status = 'in_progress'
                         """,
                         (
                             row["id"], Json(labels),
                             UNKNOWN_REVIEW_STATUS if review_photo else "completed",
                             UNKNOWN_REVIEW_MESSAGE if review_photo else "รับของเรียบร้อย",
+                            review_photo,
                             queue_id,
                         ),
                     )
@@ -372,10 +380,12 @@ class EventStore:
         with self.connection() as connection:
             return connection.execute(
                 """
-                SELECT q.id AS queue_id, q.job_id, q.armbot_job_id, q.event_id,
+                SELECT q.id AS queue_id, COALESCE(parent.job_id, q.job_id) AS job_id,
+                       q.armbot_job_id, q.event_id,
                        q.status, q.requested, q.detected,
                        COALESCE(e.detected_at, q.updated_at) AS detected_at
                 FROM receiving_history q
+                LEFT JOIN receiving_history parent ON parent.id = q.parent_queue_id
                 LEFT JOIN device_events e ON e.id = q.event_id
                 WHERE q.mqtt_result_pending
                   AND (q.event_id IS NOT NULL OR q.status IN ('not_found', 'incomplete'))
@@ -419,13 +429,14 @@ class EventStore:
             row = connection.execute(
                 """
                 INSERT INTO receiving_history
-                    (job_id, armbot_job_id, status, requested, detected, message)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                    (job_id, armbot_job_id, status, requested, detected, message, parent_queue_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
                     job["job_id"], job.get("armbot_job_id"), job["status"],
                     Json(job["requested"]), Json(job["detected"]), job["message"],
+                    job.get("parent_queue_id"),
                 ),
             ).fetchone()
         self.history_revision = uuid.uuid4().hex
@@ -474,7 +485,7 @@ class EventStore:
         with self.connection() as connection:
             return connection.execute(
                 """
-                SELECT id, job_id, armbot_job_id, received_at, updated_at,
+                SELECT id, job_id, armbot_job_id, parent_queue_id, received_at, updated_at,
                        status, requested, detected, message
                 FROM receiving_history
                 WHERE (%s::bigint IS NULL OR id < %s)
@@ -641,6 +652,7 @@ class MqttReceivingService:
         self._lock = threading.RLock()
         self._client: mqtt.Client | None = None
         self._job: dict[str, Any] | None = None
+        self._manual_job: dict[str, Any] | None = None
         self.on_queue_replaced: Callable[[str], None] | None = None
         self.on_armbot_cancelled: Callable[[int], None] | None = None
         self._replaced_legacy_armbot_keys: deque[tuple[str, str]] = deque(maxlen=100)
@@ -743,12 +755,18 @@ class MqttReceivingService:
         with self._lock:
             return {
                 "job": self._job_snapshot_locked(),
+                "manual_job": (
+                    self._job_snapshot_locked(self._manual_job) if self._manual_job else None
+                ),
             }
 
     def is_fallback_active(self) -> bool:
         with self._lock:
             job = self._job
-            return bool(job and job["status"] == "in_progress" and job.get("camera_fallback"))
+            return bool(
+                job and job["status"] == "in_progress"
+                and (job.get("camera_fallback") or job.get("manual_scan"))
+            )
 
     def test_subscriptions(self, timeout_seconds: float = 4.0) -> dict[str, Any]:
         client = self._client
@@ -833,7 +851,8 @@ class MqttReceivingService:
         return max(0, math.ceil(done_at + ARMBOT_IR_WAIT_SECONDS - time.monotonic()))
 
     def attach_camera(
-        self, job_id: str, *, fallback: bool = False, background_ready: bool = True
+        self, job_id: str, *, fallback: bool = False, background_ready: bool = True,
+        manual: bool = False,
     ) -> None:
         with self._lock:
             job = self._job
@@ -846,7 +865,7 @@ class MqttReceivingService:
             if fallback and self._fallback_in_seconds(job) != 0:
                 raise ValueError("คิวนี้ยังไม่พร้อมเปิดกล้องสำรอง")
             review_photo = UNKNOWN_LABEL in job["requested"]
-            if not background_ready and not fallback and not review_photo:
+            if not background_ready and not fallback and not review_photo and not manual:
                 raise ValueError(
                     "ยังไม่ได้ตั้งภาพอ้างอิงฉากหลัง "
                     "เปิดกล้องทดสอบขณะฉากว่างและบันทึกฉากหลังก่อน"
@@ -855,15 +874,64 @@ class MqttReceivingService:
                 **job,
                 "status": "in_progress",
                 "camera_fallback": fallback,
+                "manual_scan": manual,
                 "message": (
                     "กำลังถ่ายรูปสำหรับทีมตรวจ Unknown"
-                    if review_photo else "กำลังตรวจด้วยกล้องสำรอง"
+                    if review_photo else "กำลังตรวจอุปกรณ์ด้วยตนเอง"
+                    if manual else "กำลังตรวจด้วยกล้องสำรอง"
                     if fallback else "IR ตรวจพบอุปกรณ์ · เปิดกล้องรอของให้ครบ"
                 ),
             }
             self._event_store.update_queue(updated)
             job.update(updated)
             self._publish_job_state(self._job_snapshot_locked(), "processing")
+
+    def start_manual_scan(
+        self, history_id: int, load_model: Callable[[], None]
+    ) -> tuple[str, bool]:
+        with self._lock:
+            current = self._job
+            if current and current["history_id"] == history_id and current["status"] == "waiting_ir":
+                review_photo = UNKNOWN_LABEL in current["requested"]
+                if not review_photo:
+                    load_model()
+                self.attach_camera(current["job_id"], manual=True)
+                return current["job_id"], review_photo
+
+            original = self._event_store.get_queue(history_id)
+            if original is None:
+                raise ValueError("ไม่พบคิวที่เลือก")
+            requested = original["requested"]
+            if not requested or set(requested) - set(MODEL_CLASS_LABELS.values()):
+                raise ValueError("คิวนี้ไม่มีรายการอุปกรณ์ที่ตรวจด้วยกล้องได้")
+            review_photo = UNKNOWN_LABEL in requested
+            if not review_photo:
+                load_model()
+            job = {
+                "job_id": uuid.uuid4().hex,
+                "parent_queue_id": original["parent_queue_id"] or history_id,
+                "armbot_job_id": original["armbot_job_id"],
+                "status": "in_progress",
+                "requested": requested,
+                "detected": dict.fromkeys(requested, 0),
+                "item_id": None,
+                "source": "manual",
+                "success": False,
+                "manual_scan": True,
+                "message": "กำลังตรวจซ้ำจากประวัติคิว",
+            }
+            new_history_id = self._event_store.add_queue(job)
+            if new_history_id is None:
+                raise RuntimeError("เริ่มบันทึกรอบตรวจซ้ำไม่ได้")
+            job["history_id"] = new_history_id
+            self._manual_job = job
+            return job["job_id"], review_photo
+
+    def _camera_job_locked(self, job_id: str) -> dict[str, Any] | None:
+        for job in (self._job, self._manual_job):
+            if job is not None and job["job_id"] == job_id and job["status"] == "in_progress":
+                return job
+        return None
 
     def needs_review_photo(self, job_id: str | None) -> bool:
         with self._lock:
@@ -879,18 +947,14 @@ class MqttReceivingService:
         job_state: dict[str, Any] | None = None
         event_type = "progress"
         with self._lock:
-            job = self._job
-            if (
-                job is None
-                or job["job_id"] != job_id
-                or job["status"] != "in_progress"
-            ):
+            job = self._camera_job_locked(job_id)
+            if job is None:
                 return
 
             if UNKNOWN_LABEL in job["requested"]:
                 save_result({}, job["history_id"])
                 job.update(status=UNKNOWN_REVIEW_STATUS, message=UNKNOWN_REVIEW_MESSAGE)
-                self._publish_job_state(self._job_snapshot_locked(), UNKNOWN_REVIEW_STATUS)
+                self._publish_job_state(self._job_snapshot_locked(job), UNKNOWN_REVIEW_STATUS)
                 self._results_ready.set()
                 return
 
@@ -909,12 +973,14 @@ class MqttReceivingService:
                     status="completed", message="รับของเรียบร้อย",
                     success=True, detected=detected,
                 )
-                job_state = self._job_snapshot_locked()
+                job_state = self._job_snapshot_locked(job)
                 event_type = "completed"
-            elif (timeout_result := self._fallback_timeout(job, detected)) is not None:
-                self._event_store.update_queue(timeout_result, queue_result=True)
+            elif (timeout_result := self._inspection_timeout(job, detected)) is not None:
+                self._event_store.update_queue(
+                    timeout_result, queue_result=job.get("parent_queue_id") is None
+                )
                 job.update(timeout_result)
-                job_state = self._job_snapshot_locked()
+                job_state = self._job_snapshot_locked(job)
                 event_type = job["status"]
             elif detected != job["detected"]:
                 detected_count = sum(detected.values())
@@ -927,17 +993,17 @@ class MqttReceivingService:
                 updated = {**job, "detected": detected, "message": message}
                 self._event_store.update_queue(updated)
                 job.update(updated)
-                job_state = self._job_snapshot_locked()
+                job_state = self._job_snapshot_locked(job)
 
             if job_state is not None:
                 self._publish_job_state(job_state, event_type)
                 if event_type in ("completed", "not_found", "incomplete"):
                     self._results_ready.set()
 
-    def _fallback_timeout(
+    def _inspection_timeout(
         self, job: dict[str, Any], detected: dict[str, int]
     ) -> dict[str, Any] | None:
-        if not job.get("camera_fallback"):
+        if not (job.get("camera_fallback") or job.get("manual_scan")):
             return None
         now = time.monotonic()
         last_frame_at = job.get("fallback_last_frame_at")
@@ -953,17 +1019,13 @@ class MqttReceivingService:
         return {
             **job, "detected": dict(peak),
             "status": "incomplete" if found else "not_found",
-            "message": "ตรวจสำรองแล้วพบอุปกรณ์ไม่ครบ" if found else "ตรวจสำรองแล้วไม่พบอุปกรณ์",
+            "message": "ตรวจแล้วพบอุปกรณ์ไม่ครบ" if found else "ตรวจแล้วไม่พบอุปกรณ์",
         }
 
     def abort_camera(self, job_id: str) -> None:
         with self._lock:
-            job = self._job
-            if (
-                job is None
-                or job["job_id"] != job_id
-                or job["status"] != "in_progress"
-            ):
+            job = self._camera_job_locked(job_id)
+            if job is None:
                 return
             updated = {
                 **job,
@@ -976,7 +1038,7 @@ class MqttReceivingService:
             except psycopg.Error:
                 LOGGER.exception("Could not record the stopped receiving job %s", job_id)
             job.update(updated)
-            self._publish_job_state(self._job_snapshot_locked(), "incomplete")
+            self._publish_job_state(self._job_snapshot_locked(job), "incomplete")
 
     def cancel_queue(self, history_id: int, reason: str) -> dict[str, Any]:
         with self._lock:
@@ -1474,44 +1536,47 @@ class MqttReceivingService:
             self.on_queue_replaced(job["job_id"])
         self._sync_armbot_job_status()
 
-    def _job_snapshot_locked(self) -> dict[str, Any] | None:
-        if self._job is None:
+    def _job_snapshot_locked(
+        self, active: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        active = self._job if active is None else active
+        if active is None:
             return None
-        job = dict(self._job)
-        job["fallback_in_seconds"] = self._fallback_in_seconds(self._job)
+        job = dict(active)
+        job["fallback_in_seconds"] = self._fallback_in_seconds(active)
         for key in (
             "armbot_done_at", "fallback_started_at", "fallback_last_frame_at", "fallback_detected"
         ):
             job.pop(key, None)
-        job["requested"] = dict(self._job["requested"])
-        job["detected"] = dict(self._job["detected"])
+        job["requested"] = dict(active["requested"])
+        job["detected"] = dict(active["detected"])
         job["progress"] = {
             name: {
-                "detected": min(self._job["detected"][name], quantity),
+                "detected": min(active["detected"][name], quantity),
                 "requested": quantity,
             }
-            for name, quantity in self._job["requested"].items()
+            for name, quantity in active["requested"].items()
         }
         job["inspection_items"] = [
             {
                 "name": name,
                 "requested": quantity,
-                "detected": min(self._job["detected"][name], quantity),
+                "detected": min(active["detected"][name], quantity),
                 "remaining": max(
-                    0, quantity - self._job["detected"][name]
+                    0, quantity - active["detected"][name]
                 ),
             }
-            for name, quantity in self._job["requested"].items()
+            for name, quantity in active["requested"].items()
         ]
-        job["count"] = sum(self._job["requested"].values())
+        job["count"] = sum(active["requested"].values())
         job["detected_count"] = sum(
-            min(self._job["detected"][name], quantity)
-            for name, quantity in self._job["requested"].items()
+            min(active["detected"][name], quantity)
+            for name, quantity in active["requested"].items()
         )
         job["remaining_count"] = max(0, job["count"] - job["detected_count"])
         job["needs_review_photo"] = UNKNOWN_LABEL in job["requested"]
-        if len(self._job["requested"]) == 1:
-            class_name = next(iter(self._job["requested"]))
+        if len(active["requested"]) == 1:
+            class_name = next(iter(active["requested"]))
             model_class = next(
                 (
                     model_name
@@ -1535,7 +1600,7 @@ class MqttReceivingService:
     def _publish_job_state(
         self, job: dict[str, Any] | None, event_type: str
     ) -> None:
-        if job is None:
+        if job is None or job.get("parent_queue_id") is not None:
             return
         event_status = (
             "processing"
@@ -1845,6 +1910,10 @@ class CameraService:
         )
 
     def start(self, request: CameraRequest) -> None:
+        if request.manual_queue_id is not None and (
+            request.receive_job_id is not None or request.fallback or request.mode != "browser"
+        ):
+            raise ValueError("การตรวจคิวด้วยตนเองต้องใช้กล้องในเบราว์เซอร์")
         if request.fallback and request.receive_job_id is None:
             raise ValueError("การตรวจสำรองต้องระบุคิวรับอุปกรณ์")
         if request.receive_job_id is not None and request.mode != "browser":
@@ -1858,15 +1927,21 @@ class CameraService:
         with self._lock:
             if self._running:
                 raise ValueError("กล้องกำลังทำงานอยู่แล้ว")
-            review_capture = self._receiving_service.needs_review_photo(request.receive_job_id)
-            if not review_capture:
-                self._load_model()
-            if request.receive_job_id is not None:
-                self._receiving_service.attach_camera(
-                    request.receive_job_id,
-                    fallback=request.fallback,
-                    background_ready=self._background_reference is not None,
+            if request.manual_queue_id is not None:
+                receiving_job_id, review_capture = self._receiving_service.start_manual_scan(
+                    request.manual_queue_id, self._load_model
                 )
+            else:
+                receiving_job_id = request.receive_job_id
+                review_capture = self._receiving_service.needs_review_photo(receiving_job_id)
+                if not review_capture:
+                    self._load_model()
+                if receiving_job_id is not None:
+                    self._receiving_service.attach_camera(
+                        receiving_job_id,
+                        fallback=request.fallback,
+                        background_ready=self._background_reference is not None,
+                    )
             self._confidence = request.confidence
             self._iou = request.iou
             self._capture = None
@@ -1876,8 +1951,8 @@ class CameraService:
             self._reset_state(
                 "browser",
                 request.trigger_id,
-                request.record_events and request.receive_job_id is None,
-                request.receive_job_id,
+                request.record_events and receiving_job_id is None,
+                receiving_job_id,
                 review_capture,
             )
 
