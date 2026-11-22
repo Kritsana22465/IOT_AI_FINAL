@@ -9,6 +9,7 @@ import secrets
 import threading
 import time
 import uuid
+from collections import deque
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -226,6 +227,12 @@ class EventStore:
             )
             connection.execute(
                 """
+                CREATE INDEX IF NOT EXISTS receiving_accepted_job_idx
+                ON receiving_history (job_id) WHERE status <> 'rejected'
+                """
+            )
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS receiving_pick_images (
                     id BIGSERIAL PRIMARY KEY,
                     queue_id BIGINT NOT NULL REFERENCES receiving_history(id),
@@ -368,8 +375,28 @@ class EventStore:
                 (queue_id, event_id),
             )
 
-    def add_queue(self, job: dict[str, Any]) -> int:
+    def add_queue(
+        self, job: dict[str, Any], replaced_history_id: int | None = None
+    ) -> int | None:
         with self.connection() as connection:
+            if job["status"] == "waiting_ir" and connection.execute(
+                """
+                SELECT 1 FROM receiving_history
+                WHERE job_id = %s AND status <> 'rejected'
+                LIMIT 1
+                """,
+                (job["job_id"],),
+            ).fetchone():
+                return None
+            if replaced_history_id is not None:
+                connection.execute(
+                    """
+                    UPDATE receiving_history
+                    SET status = 'superseded', message = %s, updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    ("มีคิวใหม่มาแทน", replaced_history_id),
+                )
             row = connection.execute(
                 """
                 INSERT INTO receiving_history
@@ -594,6 +621,9 @@ class MqttReceivingService:
         self._lock = threading.RLock()
         self._client: mqtt.Client | None = None
         self._job: dict[str, Any] | None = None
+        self.on_queue_replaced: Callable[[str], None] | None = None
+        self._replaced_legacy_unknown_sources: deque[str] = deque(maxlen=100)
+        self._seen_unknown_acks: deque[tuple[int, float]] = deque(maxlen=100)
         self._unknown_image_info: tuple[float, dict[str, Any]] | None = None
         self._unknown_references: dict[
             tuple[str, float], ObjectSignature
@@ -783,8 +813,7 @@ class MqttReceivingService:
             }
             self._event_store.update_queue(updated)
             job.update(updated)
-            job_state = self._job_snapshot_locked()
-        self._publish_job_state(job_state, "processing")
+            self._publish_job_state(self._job_snapshot_locked(), "processing")
 
     def observe(
         self,
@@ -834,10 +863,10 @@ class MqttReceivingService:
                 job.update(updated)
                 job_state = self._job_snapshot_locked()
 
-        if job_state is not None:
-            self._publish_job_state(job_state, event_type)
-            if event_type == "completed":
-                self._results_ready.set()
+            if job_state is not None:
+                self._publish_job_state(job_state, event_type)
+                if event_type == "completed":
+                    self._results_ready.set()
 
     def abort_camera(self, job_id: str) -> None:
         with self._lock:
@@ -859,8 +888,7 @@ class MqttReceivingService:
             except psycopg.Error:
                 LOGGER.exception("Could not record the stopped receiving job %s", job_id)
             job.update(updated)
-            result = self._job_snapshot_locked()
-        self._publish_job_state(result, "incomplete")
+            self._publish_job_state(self._job_snapshot_locked(), "incomplete")
 
     def cancel_queue(self, history_id: int, reason: str) -> dict[str, Any]:
         with self._lock:
@@ -928,6 +956,7 @@ class MqttReceivingService:
         with self._lock:
             self._mqtt_connected = False
             self._unknown_image_info = None
+            self._replaced_legacy_unknown_sources.clear()
             if reason_code != 0:
                 self._mqtt_error = f"MQTT disconnected: {reason_code}"
                 LOGGER.warning(self._mqtt_error)
@@ -1008,8 +1037,9 @@ class MqttReceivingService:
                     return
 
                 quantity = payload.get("count", payload.get("quantity", 1))
+                client_job_id = payload.get("job_id")
                 request = ReceivingRequest(
-                    job_id=str(payload.get("job_id") or uuid.uuid4().hex),
+                    job_id=str(client_job_id or uuid.uuid4().hex),
                     items=[{"class": yolo_class, "quantity": quantity}],
                 )
                 self.submit(
@@ -1017,6 +1047,7 @@ class MqttReceivingService:
                     item_id=item_id.strip().lower(),
                     source=source,
                     armbot_job_id=self._explicit_armbot_job_id(payload),
+                    legacy_job_id=not isinstance(client_job_id, str) or not client_job_id,
                 )
                 return
 
@@ -1092,7 +1123,20 @@ class MqttReceivingService:
             return
         if not 1 <= count <= 100:
             return
+        ref = payload.get("job_id") or robot_job.get("ref")
+        if ref is not None and (not isinstance(ref, str) or not ref.strip() or len(ref) > 100):
+            return
         with self._lock:
+            created = robot_job.get("created")
+            if type(created) in (int, float) and 0 < created < math.inf:
+                ack_key = (arm_id, created)
+                if ack_key in self._seen_unknown_acks:
+                    return
+                self._seen_unknown_acks.append(ack_key)
+            if ref is None and source in self._replaced_legacy_unknown_sources:
+                # ARMbot emits unkeyed acknowledgments in command order.
+                self._replaced_legacy_unknown_sources.remove(source)
+                return
             job = self._job
             if job is not None:
                 if job.get("armbot_job_id") == str(arm_id):
@@ -1102,6 +1146,7 @@ class MqttReceivingService:
                         UNKNOWN_LABEL in job["requested"]
                         and job["source"] == source
                         and job.get("armbot_job_id") is None
+                        and (job["legacy_job_id"] if ref is None else job["job_id"] == ref)
                     ):
                         requested = dict(job["requested"])
                         if len(job["requested"]) == 1:
@@ -1127,7 +1172,7 @@ class MqttReceivingService:
                         }
                     return
         request = ReceivingRequest(
-            job_id=f"armbot-unknown-{arm_id}-{uuid.uuid4().hex}",
+            job_id=ref or f"armbot-unknown-{arm_id}-{uuid.uuid4().hex}",
             items=[ReceivingItem(**{"class": "unknown", "quantity": count})],
         )
         self.submit(request, item_id="unknown", source=source, armbot_job_id=str(arm_id))
@@ -1221,6 +1266,7 @@ class MqttReceivingService:
         item_id: str | None = None,
         source: str = "mqtt",
         armbot_job_id: str | None = None,
+        legacy_job_id: bool = False,
     ) -> None:
         requested: dict[str, int] = {}
         for item in request.items:
@@ -1234,6 +1280,7 @@ class MqttReceivingService:
             "item_id": item_id,
             "source": source,
             "armbot_job_id": armbot_job_id,
+            "legacy_job_id": legacy_job_id,
             "success": False,
             "message": "รอ IR ตรวจพบอุปกรณ์",
         }
@@ -1249,48 +1296,48 @@ class MqttReceivingService:
             self._event_store.add_queue({**queued_job, "status": "rejected", "message": reason})
             self._publish_event({"type": "rejected", "job_id": request.job_id, "message": reason})
             return
-        accepted = True
-        event_type = "queued"
         with self._lock:
             job = self._job
             if job is not None and job["job_id"] == request.job_id:
-                result = self._job_snapshot_locked()
                 event_type = (
                     "processing"
                     if job["status"] in ("waiting_ir", "in_progress")
                     else job["status"]
                 )
-            elif job is not None and job["status"] in (
-                "waiting_ir",
-                "in_progress",
-            ):
-                result = None
-                accepted = False
-                self._event_store.add_queue(
+                self._publish_job_state(self._job_snapshot_locked(), event_type)
+                return
+            replaces_active_queue = job is not None and job["status"] in (
+                "waiting_ir", "in_progress",
+            )
+            replaced_history_id = job["history_id"] if replaces_active_queue else None
+            history_id = self._event_store.add_queue(queued_job, replaced_history_id)
+            if history_id is None:
+                return
+            if replaces_active_queue:
+                if (
+                    job["legacy_job_id"] and UNKNOWN_LABEL in job["requested"]
+                    and job.get("armbot_job_id") is None
+                ):
+                    self._replaced_legacy_unknown_sources.append(job["source"])
+                self._publish_event(
                     {
-                        **queued_job, "status": "rejected",
-                        "message": "มีงานรับอุปกรณ์อื่นกำลังทำงานอยู่",
+                        "type": "superseded",
+                        "status": "superseded",
+                        "job_id": job["job_id"],
+                        "replaced_by": request.job_id,
+                        "message": "มีคิวใหม่มาแทน",
                     }
                 )
-            else:
-                queued_job["history_id"] = self._event_store.add_queue(queued_job)
-                self._unknown_references.clear()
-                self._pending_pick_images.clear()
-                self._unknown_image_info = None
-                self._job = queued_job
-                result = self._job_snapshot_locked()
-        if not accepted:
-            self._publish_event(
-                {
-                    "type": "rejected",
-                    "job_id": request.job_id,
-                    "item_id": item_id,
-                    "source": source,
-                    "message": "มีงานรับอุปกรณ์อื่นกำลังทำงานอยู่",
-                }
-            )
-            return
-        self._publish_job_state(result, event_type)
+            queued_job["history_id"] = history_id
+            queued_job["replaces_active_queue"] = replaces_active_queue
+            self._unknown_references.clear()
+            self._pending_pick_images.clear()
+            self._unknown_image_info = None
+            self._job = queued_job
+            self._publish_job_state(self._job_snapshot_locked(), "queued")
+        # Camera operations can acquire the receiving lock, so notify after releasing it.
+        if job is not None and self.on_queue_replaced is not None:
+            self.on_queue_replaced(job["job_id"])
 
     def _job_snapshot_locked(self) -> dict[str, Any] | None:
         if self._job is None:
@@ -1704,11 +1751,15 @@ class CameraService:
     def cancel_receiving(self, history_id: int, reason: str) -> dict[str, Any]:
         with self._lock:
             job = self._receiving_service.cancel_queue(history_id, reason)
-            if self._state["receiving_job_id"] == job["job_id"]:
+            self.stop_receiving_job(job["job_id"])
+            return job
+
+    def stop_receiving_job(self, job_id: str) -> None:
+        with self._lock:
+            if self._state["receiving_job_id"] == job_id:
                 self._running = False
                 self._reset_state(None)
                 self._jpeg = placeholder_frame("Camera stopped")
-            return job
 
     def stop(self, session_id: str | None = None) -> None:
         with self._lock:
@@ -2090,6 +2141,7 @@ event_store = EventStore(
 )
 receiving = MqttReceivingService(event_store)
 camera = CameraService(event_store, receiving)
+receiving.on_queue_replaced = camera.stop_receiving_job
 arduino = ArduinoWifi(event_store)
 browser_frame_gate = threading.Lock()
 
