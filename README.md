@@ -48,20 +48,6 @@ const char API_KEY[] = "ค่าเดียวกับ ARDUINO_API_KEY";
 
 อย่า commit ค่า Wi-Fi หรือ API key จริงลง GitHub
 
-### Buzzer
-
-ใช้ขา D5 เป็นสัญญาณของ Buzzer และต่อ GND ร่วมกับ Arduino ถ้าใช้โมดูลแบบมีขา
-VCC ให้จ่ายไฟตามพิกัดของโมดูล หากใช้ Buzzer สองขาที่กินกระแสเกิน 8 mA ให้ต่อผ่าน
-วงจรขับ แล้วใช้ D5 ควบคุมวงจรขับ
-
-- ค่าเริ่มต้นใช้ Active Buzzer แบบ HIGH trigger ถ้าโมดูลเป็น LOW trigger ให้ตั้ง `BUZZER_ACTIVE_HIGH` เป็น `false`
-- ถ้าเป็น Passive Buzzer ให้ตั้ง `BUZZER_IS_ACTIVE` เป็น `false`
-- ตอนมีคิวรอและแท่นว่าง จะดังสั้น 150 ms ทุก 1.5 วินาที พอ IR พบของจะหยุดเสียงสั้น
-- หลัง Dashboard ตรวจครบและบันทึกรูปสำเร็จ จะดังยาว 1 วินาทีหนึ่งครั้ง แล้วเงียบจนกว่าจะมีคิวถัดไป
-
-อัปเดต Dashboard และอัปโหลดเฟิร์มแวร์รุ่นนี้ด้วยกัน Arduino รับสถานะจากการส่ง IR รอบเดิม
-จึงอาจใช้เวลาถึงรอบส่งถัดไปประมาณ 3 วินาทีจึงเริ่มส่งเสียง
-
 ## รับรายการอุปกรณ์ผ่าน MQTT
 
 Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ่าน WebSocket + TLS โดยใช้ prefix `armbot-010eb21b` และ subscribe
@@ -70,9 +56,16 @@ Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ�
 `MQTT_HOST`, `MQTT_PORT`, `MQTT_QUEUE_TOPIC`, `MQTT_EVENT_TOPIC`,
 `MQTT_STATUS_TOPIC`
 
-Dashboard รับสถานะยกเลิกจาก `armbot-010eb21b/status` เมื่อ ARMbot ยืนยันว่า
+Dashboard รับสถานะคิวจาก `armbot-010eb21b/status` เมื่อ ARMbot ยืนยันว่า
 คิวเดียวกันถูกยกเลิก Dashboard จะหยุดรอ ปิดกล้องถ้ากำลังตรวจ และเก็บคิวไว้ในประวัติว่า
-“ยกเลิกแล้ว” การเปิดกล้องตรวจยังเริ่มจาก IR ตามเดิม
+“ยกเลิกแล้ว” กล้องเปิดทันทีเมื่อ IR ตรวจพบของตามรอบปกติ
+
+เมื่อ ARMbot รายงาน `jobs[].state: "done"` ของคิวที่ตรงกัน Dashboard จะให้เวลา IR
+อีก 10 วินาที หากยังไม่มีสัญญาณพบของ จะเปิดกล้องในเบราว์เซอร์และตรวจสำรอง
+ประมาณ 20 วินาที นับจากเริ่มประมวลผลภาพ หากพบครบจะบันทึกรูปและแจ้ง `completed`
+หากหมดเวลาจะปิดกล้องและบันทึกผล `not_found` หรือ `incomplete`
+เปิด Dashboard ค้างไว้และอนุญาตกล้อง สำหรับคิว Unknown ตัวจับเวลาเริ่มเมื่อฉากหลัง
+และภาพอ้างอิงจาก ARMbot พร้อมตรวจ
 ผ่าน environment variables
 
 ตัวอย่างส่งคำขอ:
@@ -91,7 +84,7 @@ Dashboard รับสถานะยกเลิกจาก `armbot-010eb21b/s
 และ status `busy`; หลังรับคิวระบบจะอยู่สถานะ `waiting_ir` และยังไม่เปิดกล้อง
 จนกว่า Arduino จะส่ง `object_present: true` เมื่อ IR ตรวจพบของ ระบบจะเปิดกล้อง
 ของ Dashboard นี้เพื่อตรวจนับตามรายการในคิว อัปเดตจำนวนคงเหลือ และเมื่อครบจะส่ง
-event `completed` พร้อม status `ready` งานจะรอ IR และรออุปกรณ์ให้ครบโดยไม่มี timeout
+event `completed` พร้อม status `ready` รอบที่เริ่มจาก IR จะรออุปกรณ์ให้ครบโดยไม่มี timeout
 เมื่อมีคิวใหม่ ระบบจะเปลี่ยนไปตรวจตามคิวล่าสุดและเก็บคิวเดิมในประวัติเป็น `superseded`
 ถ้า IR ยังตรวจพบอุปกรณ์อยู่ ระบบจะเริ่มตรวจคิวล่าสุดด้วยภาพจากรอบกล้องใหม่
 ถ้าแท่นว่าง ระบบจะรอ IR ตรวจพบอุปกรณ์ก่อนเปิดกล้อง
@@ -153,6 +146,30 @@ Dashboard จะส่ง JSON หนึ่งข้อความเมื่�
   การยืนยันจาก broker หมายถึง broker รับข้อความแล้ว
 - Broker เริ่มต้นเป็นสาธารณะ ให้ใช้ภาพทดสอบที่แชร์ได้ หรือใช้ broker ส่วนตัว
   ที่จำกัดสิทธิ์ publish/subscribe สำหรับรูปใช้งานจริง
+
+### ผลตรวจสำรองเมื่อหมดเวลา
+
+ฝั่ง ARMbot ใช้ topic ผลตรวจเดิม `armbot-010eb21b/inspection/result` และอ่านผล
+`type: "inspection_result"` ที่มี `status: "not_found"` เมื่อไม่พบอุปกรณ์ที่ขอ
+หรือ `status: "incomplete"` เมื่อพบเพียงบางส่วน ฝั่งรับควรรองรับสถานะเหล่านี้
+ก่อนอ่านรูปและใช้ `result_id` ตัดข้อความ MQTT ซ้ำ
+
+```json
+{
+  "schema_version": 1,
+  "type": "inspection_result",
+  "status": "not_found",
+  "reason": "camera_timeout",
+  "result_id": "queue:42",
+  "job_id": "pick-100",
+  "armbot_job_id": "18",
+  "event_id": null,
+  "completed_at": "2026-11-22T10:00:30+00:00",
+  "requested": {"Relay module": 1},
+  "detected": {"Relay module": 0},
+  "image": null
+}
+```
 
 ## Deploy AWS ครั้งแรก
 

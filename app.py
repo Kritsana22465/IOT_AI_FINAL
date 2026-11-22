@@ -112,6 +112,9 @@ MQTT_UNKNOWN_TOPIC = f"{MQTT_ARMBOT_PREFIX}/unknown"
 MQTT_UNKNOWN_IMAGE_TOPIC = f"{MQTT_UNKNOWN_TOPIC}/image"
 UNKNOWN_IMAGE_MAX_BYTES = 1024 * 1024
 UNKNOWN_IMAGE_PAIR_SECONDS = 5
+ARMBOT_IR_WAIT_SECONDS = 10
+FALLBACK_SCAN_SECONDS = 20
+FALLBACK_MAX_FRAME_GAP_SECONDS = 10
 LOGGER = logging.getLogger(__name__)
 
 
@@ -123,6 +126,7 @@ class CameraRequest(BaseModel):
     trigger_id: str | None = Field(default=None, max_length=100)
     record_events: bool = True
     receive_job_id: str | None = Field(default=None, max_length=100)
+    fallback: bool = False
 
 
 class IRSensorRequest(BaseModel):
@@ -223,11 +227,13 @@ class EventStore:
             )
             connection.execute(
                 """
-                CREATE INDEX IF NOT EXISTS receiving_mqtt_pending_idx
+                CREATE INDEX IF NOT EXISTS receiving_mqtt_outbox_idx
                 ON receiving_history (id)
-                WHERE mqtt_result_pending AND event_id IS NOT NULL
+                WHERE mqtt_result_pending
+                  AND (event_id IS NOT NULL OR status IN ('not_found', 'incomplete'))
                 """
             )
+            connection.execute("DROP INDEX IF EXISTS receiving_mqtt_pending_idx")
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS receiving_accepted_job_idx
@@ -359,21 +365,23 @@ class EventStore:
             return connection.execute(
                 """
                 SELECT q.id AS queue_id, q.job_id, q.armbot_job_id, q.event_id,
-                       q.requested, q.detected, e.detected_at
+                       q.status, q.requested, q.detected,
+                       COALESCE(e.detected_at, q.updated_at) AS detected_at
                 FROM receiving_history q
-                JOIN device_events e ON e.id = q.event_id
-                WHERE q.mqtt_result_pending AND q.event_id IS NOT NULL
+                LEFT JOIN device_events e ON e.id = q.event_id
+                WHERE q.mqtt_result_pending
+                  AND (q.event_id IS NOT NULL OR q.status IN ('not_found', 'incomplete'))
                 ORDER BY q.id
                 LIMIT 1
                 """
             ).fetchone()
 
-    def acknowledge_mqtt_result(self, queue_id: int, event_id: int) -> None:
+    def acknowledge_mqtt_result(self, queue_id: int, event_id: int | None) -> None:
         with self.connection() as connection:
             connection.execute(
                 """
                 UPDATE receiving_history SET mqtt_result_pending = FALSE
-                WHERE id = %s AND event_id = %s
+                WHERE id = %s AND event_id IS NOT DISTINCT FROM %s
                 """,
                 (queue_id, event_id),
             )
@@ -415,18 +423,19 @@ class EventStore:
         self.history_revision = uuid.uuid4().hex
         return row["id"]
 
-    def update_queue(self, job: dict[str, Any]) -> None:
+    def update_queue(self, job: dict[str, Any], *, queue_result: bool = False) -> None:
         with self.connection() as connection:
             connection.execute(
                 """
                 UPDATE receiving_history
                 SET status = %s, requested = %s, detected = %s, message = %s,
-                    armbot_job_id = %s, updated_at = NOW()
+                    armbot_job_id = %s, updated_at = NOW(),
+                    mqtt_result_pending = mqtt_result_pending OR %s
                 WHERE id = %s
                 """,
                 (
                     job["status"], Json(job["requested"]), Json(job["detected"]),
-                    job["message"], job.get("armbot_job_id"), job["history_id"],
+                    job["message"], job.get("armbot_job_id"), queue_result, job["history_id"],
                 ),
             )
         self.history_revision = uuid.uuid4().hex
@@ -466,17 +475,6 @@ class EventStore:
                 """,
                 (before_id, before_id, limit),
             ).fetchall()
-
-    def latest_completed_queue_id(self) -> int:
-        with self.connection() as connection:
-            row = connection.execute(
-                """
-                SELECT id FROM receiving_history
-                WHERE status = 'completed'
-                ORDER BY id DESC LIMIT 1
-                """
-            ).fetchone()
-        return row["id"] if row is not None else 0
 
     def get_queue(self, queue_id: int) -> dict[str, Any] | None:
         with self.connection() as connection:
@@ -635,12 +633,11 @@ class MqttReceivingService:
         self._lock = threading.RLock()
         self._client: mqtt.Client | None = None
         self._job: dict[str, Any] | None = None
-        self._last_completed_queue_id = 0
         self.on_queue_replaced: Callable[[str], None] | None = None
         self.on_armbot_cancelled: Callable[[int], None] | None = None
         self._replaced_legacy_armbot_keys: deque[tuple[str, str]] = deque(maxlen=100)
         self._seen_armbot_acks: deque[tuple[int, float]] = deque(maxlen=100)
-        self._armbot_cancelled_jobs: list[dict[str, Any]] = []
+        self._armbot_terminal_jobs: list[dict[str, Any]] = []
         self._unknown_image_info: tuple[float, dict[str, Any]] | None = None
         self._unknown_references: dict[
             tuple[str, float], ObjectSignature
@@ -654,14 +651,6 @@ class MqttReceivingService:
         self._results_ready = threading.Event()
         self._results_stop = threading.Event()
         self._results_worker: threading.Thread | None = None
-
-    def load(self) -> None:
-        self._last_completed_queue_id = self._event_store.latest_completed_queue_id()
-
-    def buzzer_state(self) -> tuple[bool, int]:
-        with self._lock:
-            waiting = self._job is not None and self._job["status"] == "waiting_ir"
-            return waiting, self._last_completed_queue_id
 
     def start(self) -> None:
         if not all(
@@ -748,6 +737,11 @@ class MqttReceivingService:
                 "job": self._job_snapshot_locked(),
             }
 
+    def is_fallback_active(self) -> bool:
+        with self._lock:
+            job = self._job
+            return bool(job and job["status"] == "in_progress" and job.get("camera_fallback"))
+
     def test_subscriptions(self, timeout_seconds: float = 4.0) -> dict[str, Any]:
         client = self._client
         topics = (MQTT_QUEUE_TOPIC,)
@@ -823,7 +817,16 @@ class MqttReceivingService:
                 self._test_event = None
                 self._test_topics_seen = set()
 
-    def attach_camera(self, job_id: str) -> None:
+    @staticmethod
+    def _fallback_in_seconds(job: dict[str, Any]) -> int | None:
+        done_at = job.get("armbot_done_at")
+        if done_at is None or job["status"] != "waiting_ir":
+            return None
+        return max(0, math.ceil(done_at + ARMBOT_IR_WAIT_SECONDS - time.monotonic()))
+
+    def attach_camera(
+        self, job_id: str, *, fallback: bool = False, background_ready: bool = True
+    ) -> None:
         with self._lock:
             job = self._job
             if (
@@ -832,10 +835,21 @@ class MqttReceivingService:
                 or job["status"] != "waiting_ir"
             ):
                 raise ValueError("MQTT receiving request is not waiting for IR")
+            if fallback and self._fallback_in_seconds(job) != 0:
+                raise ValueError("คิวนี้ยังไม่พร้อมเปิดกล้องสำรอง")
+            if not background_ready and (not fallback or UNKNOWN_LABEL in job["requested"]):
+                raise ValueError(
+                    "ยังไม่ได้ตั้งภาพอ้างอิงฉากหลัง "
+                    "เปิดกล้องทดสอบขณะฉากว่างและบันทึกฉากหลังก่อน"
+                )
             updated = {
                 **job,
                 "status": "in_progress",
-                "message": "IR ตรวจพบอุปกรณ์ · เปิดกล้องรอของให้ครบ",
+                "camera_fallback": fallback,
+                "message": (
+                    "กำลังตรวจด้วยกล้องสำรอง"
+                    if fallback else "IR ตรวจพบอุปกรณ์ · เปิดกล้องรอของให้ครบ"
+                ),
             }
             self._event_store.update_queue(updated)
             job.update(updated)
@@ -871,19 +885,24 @@ class MqttReceivingService:
             )
             if complete:
                 save_result(detected, job["history_id"])
-                self._last_completed_queue_id = job["history_id"]
                 job.update(
                     status="completed", message="รับของเรียบร้อย",
                     success=True, detected=detected,
                 )
                 job_state = self._job_snapshot_locked()
                 event_type = "completed"
+            elif (timeout_result := self._fallback_timeout(job, detected)) is not None:
+                self._event_store.update_queue(timeout_result, queue_result=True)
+                job.update(timeout_result)
+                job_state = self._job_snapshot_locked()
+                event_type = job["status"]
             elif detected != job["detected"]:
                 detected_count = sum(detected.values())
                 requested_count = sum(job["requested"].values())
                 message = (
                     f"ตรวจพบ {detected_count}/{requested_count} รายการ "
-                    "· เปิดกล้องรอของที่เหลือ"
+                    + ("· กำลังตรวจสำรอง" if job.get("camera_fallback")
+                       else "· เปิดกล้องรอของที่เหลือ")
                 )
                 updated = {**job, "detected": detected, "message": message}
                 self._event_store.update_queue(updated)
@@ -892,8 +911,34 @@ class MqttReceivingService:
 
             if job_state is not None:
                 self._publish_job_state(job_state, event_type)
-                if event_type == "completed":
+                if event_type in ("completed", "not_found", "incomplete"):
                     self._results_ready.set()
+
+    def _fallback_timeout(
+        self, job: dict[str, Any], detected: dict[str, int]
+    ) -> dict[str, Any] | None:
+        if not job.get("camera_fallback"):
+            return None
+        if UNKNOWN_LABEL in job["requested"]:
+            _, references = self.unknown_references(job["job_id"])
+            if len(references) < job["requested"][UNKNOWN_LABEL]:
+                return None
+        now = time.monotonic()
+        last_frame_at = job.get("fallback_last_frame_at")
+        if last_frame_at is None or now - last_frame_at > FALLBACK_MAX_FRAME_GAP_SECONDS:
+            job["fallback_started_at"] = now
+        job["fallback_last_frame_at"] = now
+        peak = job.setdefault("fallback_detected", {})
+        for name, count in detected.items():
+            peak[name] = max(peak.get(name, 0), count)
+        if now - job["fallback_started_at"] < FALLBACK_SCAN_SECONDS:
+            return None
+        found = any(peak.values())
+        return {
+            **job, "detected": dict(peak),
+            "status": "incomplete" if found else "not_found",
+            "message": "ตรวจสำรองแล้วพบอุปกรณ์ไม่ครบ" if found else "ตรวจสำรองแล้วไม่พบอุปกรณ์",
+        }
 
     def abort_camera(self, job_id: str) -> None:
         with self._lock:
@@ -1017,7 +1062,7 @@ class MqttReceivingService:
             if not message.retain:
                 self._receive_armbot_message(message.topic, message.payload)
                 if message.topic == MQTT_ARMBOT_EVENT_TOPIC:
-                    self._sync_armbot_cancellation()
+                    self._sync_armbot_job_status()
             return
         payload: Any = None
         try:
@@ -1133,18 +1178,18 @@ class MqttReceivingService:
         if not isinstance(jobs, list):
             return
         with self._lock:
-            self._armbot_cancelled_jobs = [
+            self._armbot_terminal_jobs = [
                 job for job in jobs
-                if isinstance(job, dict) and job.get("state") == "cancelled"
+                if isinstance(job, dict) and job.get("state") in ("done", "cancelled")
             ]
-        self._sync_armbot_cancellation()
+        self._sync_armbot_job_status()
 
-    def _sync_armbot_cancellation(self) -> None:
+    def _sync_armbot_job_status(self) -> None:
         with self._lock:
             job = self._job
             if job is None or job["status"] not in ("waiting_ir", "in_progress"):
                 return
-            for robot_job in self._armbot_cancelled_jobs:
+            for robot_job in self._armbot_terminal_jobs:
                 arm_id = robot_job.get("id")
                 ref = robot_job.get("ref")
                 if ref == job["job_id"] or (
@@ -1156,6 +1201,15 @@ class MqttReceivingService:
                 ):
                     break
             else:
+                return
+            if robot_job["state"] == "done":
+                if job["status"] == "waiting_ir" and job.get("armbot_done_at") is None:
+                    count = robot_job.get("count")
+                    if job["armbot_job_id"] is None and type(arm_id) is int and (
+                        type(count) is int and 1 <= count <= 100
+                    ):
+                        self._bind_armbot_job(job, str(arm_id), None, count)
+                    job["armbot_done_at"] = time.monotonic()
                 return
             history_id = job["history_id"]
         if self.on_armbot_cancelled is not None:
@@ -1430,12 +1484,17 @@ class MqttReceivingService:
         # Camera operations can acquire the receiving lock, so notify after releasing it.
         if job is not None and self.on_queue_replaced is not None:
             self.on_queue_replaced(job["job_id"])
-        self._sync_armbot_cancellation()
+        self._sync_armbot_job_status()
 
     def _job_snapshot_locked(self) -> dict[str, Any] | None:
         if self._job is None:
             return None
         job = dict(self._job)
+        job["fallback_in_seconds"] = self._fallback_in_seconds(self._job)
+        for key in (
+            "armbot_done_at", "fallback_started_at", "fallback_last_frame_at", "fallback_detected"
+        ):
+            job.pop(key, None)
         job["requested"] = dict(self._job["requested"])
         job["detected"] = dict(self._job["detected"])
         job["progress"] = {
@@ -1571,27 +1630,32 @@ class MqttReceivingService:
 
     def _send_inspection_result(self, client: mqtt.Client, row: dict[str, Any]) -> None:
         event_id = row["event_id"]
-        image = self._event_store.image_bytes(event_id)
-        if image is None:
-            if self._event_store.get(event_id) is None:
-                return  # The user deleted the evidence after we read the pending row.
-            raise RuntimeError(f"Missing MQTT inspection image for event {event_id}")
         payload = {
             "schema_version": 1,
             "type": "inspection_result",
-            "status": "completed",
+            "status": row["status"],
             "job_id": row["job_id"],
             "armbot_job_id": row["armbot_job_id"],
             "event_id": event_id,
             "completed_at": row["detected_at"].isoformat(),
             "requested": row["requested"],
             "detected": row["detected"],
-            "image": {
+        }
+        if row["status"] == "completed":
+            image = self._event_store.image_bytes(event_id)
+            if image is None:
+                if self._event_store.get(event_id) is None:
+                    return  # The user deleted the evidence after we read the pending row.
+                raise RuntimeError(f"Missing MQTT inspection image for event {event_id}")
+            payload["image"] = {
                 "content_type": "image/jpeg",
                 "encoding": "base64",
                 "data": base64.b64encode(image).decode("ascii"),
-            },
-        }
+            }
+        else:
+            payload.update(
+                result_id=f"queue:{row['queue_id']}", reason="camera_timeout", image=None
+            )
         message = client.publish(
             MQTT_RESULT_TOPIC, json.dumps(payload, ensure_ascii=False), qos=1, retain=False
         )
@@ -1780,6 +1844,8 @@ class CameraService:
         )
 
     def start(self, request: CameraRequest) -> None:
+        if request.fallback and request.receive_job_id is None:
+            raise ValueError("การตรวจสำรองต้องระบุคิวรับอุปกรณ์")
         if request.receive_job_id is not None and request.mode != "browser":
             raise ValueError("MQTT receiving requires a browser camera")
         if request.mode == "browser":
@@ -1793,12 +1859,11 @@ class CameraService:
                 raise ValueError("กล้องกำลังทำงานอยู่แล้ว")
             self._load_model()
             if request.receive_job_id is not None:
-                if self._background_reference is None:
-                    raise ValueError(
-                        "ยังไม่ได้ตั้งภาพอ้างอิงฉากหลัง "
-                        "เปิดกล้องทดสอบขณะฉากว่างและบันทึกฉากหลังก่อน"
-                    )
-                self._receiving_service.attach_camera(request.receive_job_id)
+                self._receiving_service.attach_camera(
+                    request.receive_job_id,
+                    fallback=request.fallback,
+                    background_ready=self._background_reference is not None,
+                )
             self._confidence = request.confidence
             self._iou = request.iou
             self._capture = None
@@ -2193,14 +2258,19 @@ class ArduinoWifi:
     def _is_sensor_ready(last_seen: float | None, now: float) -> bool:
         return last_seen is not None and 0 <= now - last_seen <= SENSOR_TIMEOUT_SECONDS
 
-    def receive_ir(self, object_present: bool) -> dict[str, Any]:
+    def receive_ir(
+        self, object_present: bool, *, capture_enabled: bool = True
+    ) -> dict[str, Any]:
         now = time.time()
         with self._lock:
             self._rearm_if_ready_locked(now)
             previous = self._state["object_present"]
+            if not capture_enabled:
+                self._state["capture_pending"] = False
             if object_present and self._state["armed"]:
-                self._state["capture_request_id"] = uuid.uuid4().hex
-                self._state["capture_pending"] = True
+                if capture_enabled:
+                    self._state["capture_request_id"] = uuid.uuid4().hex
+                    self._state["capture_pending"] = True
                 self._state["armed"] = False
             elif not object_present and previous is not False:
                 self._state["clear_since"] = now
@@ -2264,7 +2334,6 @@ async def lifespan(_: FastAPI):
     for attempt in range(10):
         try:
             event_store.initialize()
-            receiving.load()
             arduino.load()
             last_error = None
             break
@@ -2309,6 +2378,10 @@ def test_mqtt_subscriptions() -> dict[str, Any]:
 @app.post("/api/camera/start")
 def start_camera(request: CameraRequest) -> dict[str, Any]:
     try:
+        if request.fallback:
+            sensor = arduino.state()
+            if sensor["ir_ready"] and sensor["object_present"]:
+                raise ValueError("IR ตรวจพบอุปกรณ์แล้ว ให้เปิดกล้องตามรอบ IR")
         camera.start(request)
     except (ValueError, FileNotFoundError, RuntimeError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -2454,15 +2527,12 @@ def acknowledge_capture(request: CaptureAckRequest) -> dict[str, Any]:
 @app.post("/api/arduino/ir")
 def receive_arduino_ir(
     request: IRSensorRequest,
-    response: Response,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> dict[str, Any]:
     if ARDUINO_API_KEY and not x_api_key:
         raise HTTPException(status_code=401, detail="ต้องระบุ X-API-Key")
     if ARDUINO_API_KEY and not secrets.compare_digest(x_api_key or "", ARDUINO_API_KEY):
         raise HTTPException(status_code=403, detail="X-API-Key ไม่ถูกต้อง")
-    sensor_state = arduino.receive_ir(request.object_present)
-    waiting, completed_queue_id = receiving.buzzer_state()
-    response.headers["X-IoT-Queue-Waiting"] = "1" if waiting else "0"
-    response.headers["X-IoT-Completed-Queue"] = str(completed_queue_id)
-    return sensor_state
+    return arduino.receive_ir(
+        request.object_present, capture_enabled=not receiving.is_fallback_active()
+    )

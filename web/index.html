@@ -190,7 +190,7 @@
     .history-status { font-size: 12px; color: var(--muted); text-align: right; }
     .history-status.waiting_ir, .history-status.in_progress { color: #087d83; }
     .history-status.completed { color: var(--green); }
-    .history-status.rejected, .history-status.incomplete, .history-status.interrupted, .history-status.cancelled { color: var(--red); }
+    .history-status.rejected, .history-status.not_found, .history-status.incomplete, .history-status.interrupted, .history-status.cancelled { color: var(--red); }
     .history-detail { padding: 0 0 16px; }
     .history-detail ul { margin: 8px 0 12px; padding-inline-start: 22px; }
     .history-detail .tiny { overflow-wrap: anywhere; }
@@ -501,7 +501,14 @@
       if (!active) return;
       let message = job.message;
       if (job.status === "waiting_ir") {
-        if (!arduino.ir_ready) message = "รอสัญญาณจากเซนเซอร์แท่นวาง";
+        const irDetected = arduino.ir_ready && arduino.object_present;
+        if (!irDetected && job.fallback_in_seconds > 0) {
+          message = `ARMbot วางของแล้ว · รอ IR อีก ${job.fallback_in_seconds} วินาที`;
+        } else if (!irDetected && job.fallback_in_seconds === 0) {
+          message = job.progress?.Unknown && !camera.background_ready
+            ? "รอบันทึกฉากหลังว่างก่อนตรวจสำรอง"
+            : "กำลังเตรียมกล้องเพื่อตรวจสำรอง";
+        } else if (!arduino.ir_ready) message = "รอสัญญาณจากเซนเซอร์แท่นวาง";
         else if (!arduino.object_present) message = "รอวางอุปกรณ์บนแท่น";
         else if (!arduino.capture_pending && !job.replaces_active_queue) message = "นำอุปกรณ์เดิมออกจากแท่นก่อนเริ่มรอบใหม่";
         else if (!camera.background_ready) message = "รอบันทึกฉากหลังว่างก่อนเปิดกล้องตรวจ";
@@ -591,7 +598,7 @@
         || !camera.receiving_job_id
         || !job
         || job.job_id !== camera.receiving_job_id
-        || !["completed", "incomplete"].includes(job.status)
+        || !["completed", "not_found", "incomplete"].includes(job.status)
       ) return;
       receivingCameraStopInFlight = true;
       try {
@@ -715,7 +722,8 @@
     async function startBrowserCamera(
       triggerId = null,
       recordEvents = false,
-      receiveJobId = null
+      receiveJobId = null,
+      fallback = false
     ) {
       const deviceId = byId("camera-select").value || selectedCameraId;
       const cameraState = await request("/api/camera/start", {
@@ -726,7 +734,8 @@
           mode: "browser",
           trigger_id: triggerId,
           record_events: recordEvents,
-          receive_job_id: receiveJobId
+          receive_job_id: receiveJobId,
+          fallback
         })
       });
       renderCamera(cameraState);
@@ -807,21 +816,25 @@
 
     async function maybeStartTriggeredCapture(arduino, receiving, camera) {
       const job = receiving?.job;
-      if (!job || job.status !== "waiting_ir" || !arduino.ir_ready || !arduino.object_present) return;
-      if (!camera.background_ready) return;
-      const requestId = arduino.capture_pending && arduino.capture_request_id !== lastCaptureRequestId
+      if (!job || job.status !== "waiting_ir") return;
+      const irDetected = arduino.ir_ready && arduino.object_present;
+      const fallback = !irDetected && job.fallback_in_seconds === 0;
+      if (!irDetected && !fallback) return;
+      if (!camera.background_ready && (!fallback || job.progress?.Unknown)) return;
+      const requestId = irDetected && arduino.capture_pending && arduino.capture_request_id !== lastCaptureRequestId
         ? arduino.capture_request_id
         : null;
-      if (!requestId && !job.replaces_active_queue) return;
+      if (!fallback && !requestId && !job.replaces_active_queue) return;
       if (cancelInFlight || captureRequestInFlight) return;
-      if (captureRetry?.jobId === job.job_id && Date.now() < captureRetry.until) return;
+      if (captureRetry?.jobId === job.job_id && captureRetry.fallback === fallback
+          && Date.now() < captureRetry.until) return;
       captureRequestInFlight = true;
       try {
         if (cameraRunning) {
           if (!cameraTestMode) return;
           await stopBrowserCamera();
         }
-        if (!await startBrowserCamera(requestId, false, job.job_id)) return;
+        if (!await startBrowserCamera(requestId, false, job.job_id, fallback)) return;
         if (requestId) {
           await request("/api/capture/ack", {
             method: "POST",
@@ -830,7 +843,7 @@
           lastCaptureRequestId = requestId;
         }
       } catch (error) {
-        captureRetry = { jobId: job.job_id, until: Date.now() + 5000 };
+        captureRetry = { jobId: job.job_id, fallback, until: Date.now() + 5000 };
         showError(`เปิดกล้องอัตโนมัติไม่ได้: ${error.message}`);
       } finally {
         captureRequestInFlight = false;
@@ -843,6 +856,7 @@
       completed: "ยืนยันรับแล้ว",
       cancelled: "ยกเลิกแล้ว",
       superseded: "มีคิวใหม่มาแทน",
+      not_found: "ไม่พบอุปกรณ์",
       incomplete: "ตรวจไม่ครบ",
       rejected: "คิวไม่ถูกเริ่ม",
       interrupted: "การตรวจถูกขัดจังหวะ"
