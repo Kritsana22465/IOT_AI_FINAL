@@ -50,7 +50,7 @@ const char API_KEY[] = "ค่าเดียวกับ ARDUINO_API_KEY";
 
 ## รับรายการอุปกรณ์ผ่าน MQTT
 
-Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ่าน WebSocket + TLS โดยใช้ prefix `armbot-010eb21b` และ subscribe เฉพาะ topic
+Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ่าน WebSocket + TLS โดยใช้ prefix `armbot-010eb21b` และ subscribe
 `armbot-010eb21b/cmd/queue` เพื่อรับรายการที่กำลังจะหยิบ จากนั้น publish event ไปที่
 `armbot-010eb21b/event` และ publish retained status ไปที่ `armbot-010eb21b/status` สามารถกำหนด
 `MQTT_HOST`, `MQTT_PORT`, `MQTT_QUEUE_TOPIC`, `MQTT_EVENT_TOPIC`,
@@ -67,7 +67,7 @@ Dashboard เชื่อมต่อ broker `broker.hivemq.com:8884/mqtt` ผ�
 }
 ```
 
-รับ `item_id` หรือ `text` โดยรองรับ `relay`, `triple_syringe` และ `ultrasonic`;
+รับ `item_id` หรือ `text` โดยรองรับ `relay`, `triple_syringe`, `ultrasonic` และ `unknown`;
 จำนวนรับได้จาก `count` หรือ `quantity` (ค่าเริ่มต้น 1, สูงสุด 100) และ `source`
 เป็น optional ระบบสร้าง `job_id` ให้หากไม่ส่งมา เมื่อรับคิวจะส่ง event `queued`
 และ status `busy`; หลังรับคิวระบบจะอยู่สถานะ `waiting_ir` และยังไม่เปิดกล้อง
@@ -131,7 +131,14 @@ polygon annotations เป็นกรอบ bounding box สำหรับ YOL
 และใช้ได้ต่อหลังรีสตาร์ต โดยใช้กล้องตัวเดิมและให้ตำแหน่ง/แสงคงที่ หากเปลี่ยนกล้อง
 มุมกล้องหรือฉากให้บันทึกภาพอ้างอิงใหม่ วัตถุสีหรือรูปร่างที่กลืนกับพื้นหลังอาจตรวจไม่พบ
 และเงาหรือแสงที่เปลี่ยนอาจถูกนับเป็นวัตถุได้ ระบบตัดพื้นที่ที่โมเดลตรวจเป็นสามคลาสหลัก
-ออกจาก foreground ก่อนนับเป็น `Unknown`
+ออกจาก foreground ในโหมดทดสอบกล้อง
+
+สำหรับคิว `unknown` ให้สั่งหยิบผ่าน MQTT Dashboard ใช้รหัสงานจากข้อความยืนยัน
+`<prefix>/event` จับคู่กรอบวัตถุจาก `<prefix>/unknown` กับ JPEG จาก
+`<prefix>/unknown/image` แล้วตัดเฉพาะส่วนวัตถุมาเทียบกับภาพกล้องรับของ
+การตรวจเริ่มเมื่อ IR พบของ และนับเฉพาะวัตถุที่เทียบภาพผ่านในเฟรมปัจจุบัน
+เมื่อครบจึงบันทึกรูปและส่งผลสำเร็จ หากรูปอ้างอิงมาไม่ถึงหรือวัตถุมีรายละเอียดน้อยเกินไป
+งานจะยังรอตรวจ วัตถุมีลวดลายน้อยหรือถ่ายคนละด้านอาจเทียบภาพไม่ผ่าน
 
 ภาพ train ปัจจุบันมีพื้นหลังสีต่างจากฉากขาวอมเทาที่ใช้งานจริง โมเดลสามคลาสหลัก
 อาจตรวจพลาดเมื่อเปลี่ยนฉาก ควรเพิ่มภาพของทั้งสามคลาสที่ถ่ายด้วยกล้องและฉากจริง

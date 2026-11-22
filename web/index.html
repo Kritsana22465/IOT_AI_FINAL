@@ -37,16 +37,15 @@
     .status-pill { border: 1px solid var(--line); border-radius: 999px; padding: 8px 13px; color: var(--muted); font-size: 13px; white-space: nowrap; }
     .status-pill::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--amber); }
     .status-pill.online::before { background: var(--green); box-shadow: 0 0 12px #63e6a588; }
-    .layout { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, .85fr); gap: 18px; align-items: start; }
+    .layout { margin-top: 16px; }
     .panel { background: linear-gradient(145deg, #141e2e, var(--panel)); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; box-shadow: 0 15px 40px #0003; }
     .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
     h2 { font-size: 16px; }
     .tiny { color: var(--muted); font-size: 12px; }
     .video-frame { position: relative; min-height: 310px; aspect-ratio: 16/9; background: #070a10; display: grid; place-items: center; overflow: hidden; }
-    .video-frame video, .video-frame img { width: 100%; height: 100%; position: absolute; inset: 0; object-fit: contain; }
-    .video-frame img { display: none; }
-    .video-frame.has-result img { display: block; }
-    .video-frame.has-result video { opacity: 0; }
+    .video-frame video, .video-frame canvas { width: 100%; height: 100%; position: absolute; inset: 0; object-fit: contain; }
+    .video-frame canvas { pointer-events: none; }
+    .video-frame canvas[hidden] { display: none; }
     .video-empty { position: relative; z-index: 1; padding: 24px; text-align: center; color: var(--muted); pointer-events: none; }
     .video-empty .camera-icon { font-size: 34px; margin-bottom: 8px; }
     .video-frame.active .video-empty { display: none; }
@@ -66,63 +65,21 @@
     .metric-name { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 13px; }
     .metric-value { font-size: 34px; line-height: 1.2; font-weight: 700; margin-top: 12px; }
     .metric-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: var(--cyan); }
-    .side { display: grid; gap: 18px; }
-    .sensor-body, .system-body { padding: 18px 20px 20px; }
-    .sensor-group { padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: #0f1726; }
-    .sensor-group + .sensor-group { margin-top: 12px; }
-    .sensor-group-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-    .sensor-group-title { font-size: 14px; font-weight: 700; }
-    .sensor-group-description { margin-top: 3px; color: var(--muted); font-size: 12px; }
-    .sensor-group .relay-row { margin-top: 11px; padding-top: 11px; }
-    .relay-row { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--line); padding-top: 14px; }
     .presence-state { color: var(--muted); }
     .presence-state.on { color: var(--green); }
     .presence-state.off { color: var(--amber); }
     .presence-state.stale { color: var(--amber); }
     .sensor-health.ready { color: var(--green); }
     .sensor-health.unavailable { color: var(--amber); }
-    .connection-info { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 12px; }
-    .connection-info strong { color: var(--cyan); }
     .error { display: none; padding: 11px 13px; color: #ffd5da; background: #482531; border: 1px solid #713744; border-radius: 10px; font-size: 13px; }
     .error.visible { display: block; }
-    .item-panel { margin-top: 16px; }
-    .item-list { display: grid; gap: 8px; padding: 14px 20px 18px; }
-    .item-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 12px; background: #0f1726; border: 1px solid var(--line); border-radius: 10px; }
-    .item-row.active { border-color: var(--cyan); background: #102a35; }
-    .item-name { font-weight: 700; }
-    .item-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
-    .item-badge { color: var(--muted); font-size: 12px; text-align: right; white-space: nowrap; }
-    .item-badge.active { color: var(--cyan); }
-    .item-badge.ready { color: var(--green); }
-    .item-empty { color: var(--muted); font-size: 12px; padding: 2px 0; }
-    .event-list { display: grid; gap: 10px; padding: 16px 20px 20px; max-height: 350px; overflow-y: auto; }
-    .event-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%; padding: 9px; color: var(--text); text-align: left; background: #0f1726; border: 1px solid var(--line); border-radius: 11px; }
-    .event-item:hover { border-color: var(--cyan); }
-    .event-open { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 11px; align-items: center; width: 100%; min-width: 0; padding: 0; color: var(--text); text-align: left; background: transparent; border: 0; }
-    .event-open:hover { filter: none; }
-    .event-thumb { width: 76px; height: 58px; object-fit: cover; border-radius: 7px; background: #070a10; }
-    .event-time { font-size: 13px; font-weight: 700; }
-    .event-labels { margin-top: 3px; color: var(--muted); font-size: 11px; }
-    .event-delete { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; color: var(--red); background: transparent; border: 1px solid transparent; border-radius: 8px; font-size: 23px; font-weight: 400; line-height: 1; }
-    .event-delete:hover { color: #ffd9dc; background: #472833; border-color: #713744; }
-    .event-empty { color: var(--muted); font-size: 12px; text-align: center; padding: 12px 0; }
-    .modal { display: none; position: fixed; inset: 0; z-index: 10; place-items: center; padding: 22px; background: #0009; }
-    .modal.visible { display: grid; }
-    .modal-card { width: min(760px, 100%); max-height: 90vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 20px 70px #0008; }
-    .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
-    .modal-close { padding: 6px 10px; background: #29374b; color: var(--text); }
-    .modal-card img { display: block; width: 100%; max-height: 65vh; object-fit: contain; background: #070a10; }
-    .modal-meta { padding: 12px 16px 16px; color: var(--muted); font-size: 13px; }
     .footer { margin-top: 20px; color: #78869c; font-size: 12px; text-align: center; }
     @media (max-width: 850px) {
-      .layout { grid-template-columns: 1fr; }
-      .side { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .camera-controls { grid-template-columns: repeat(2, 1fr); }
     }
     @media (max-width: 560px) {
       .shell { padding: 20px 13px 35px; }
       header { align-items: flex-start; flex-direction: column; }
-      .side { grid-template-columns: 1fr; }
       .cards { gap: 8px; }
       .metric { padding: 12px; }
       .metric-name { font-size: 11px; }
@@ -149,7 +106,7 @@
       color: var(--text);
       font-size: 15px;
     }
-    .shell { max-width: 1180px; padding: 34px 22px 48px; }
+    .shell { max-width: 960px; padding: 34px 22px 48px; }
     header { margin-bottom: 26px; }
     .brand { gap: 12px; }
     .brand-mark {
@@ -163,7 +120,6 @@
     h1 { font-size: 21px; letter-spacing: 0; }
     .subtitle { margin-top: 2px; font-size: 13px; }
     .status-pill { background: #fff; padding: 7px 12px; color: #627084; }
-    .layout { grid-template-columns: minmax(0, 1.45fr) minmax(310px, .82fr); gap: 20px; }
     .panel {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -216,40 +172,64 @@
     .camera-settings summary:hover { color: var(--cyan); }
     .camera-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
     .queue-panel { margin-top: 16px; }
-    .queue-body { padding: 0 20px 18px; }
-    .item-panel { margin-top: 16px; }
-    .item-list { padding: 12px 20px 18px; }
-    .item-row { background: #fbfcfe; border-color: var(--line); }
-    .item-row.active { border-color: #75cdd0; background: #effafa; }
-    .item-badge { color: #718096; }
-    .item-badge.active { color: #087d83; }
-    .item-badge.ready { color: var(--green); }
-    .side { gap: 16px; }
-    .sensor-body, .system-body { padding: 16px 18px 18px; }
-    .sensor-group { padding: 15px; background: #fbfcfe; border-color: var(--line); }
-    .sensor-group + .sensor-group { margin-top: 10px; }
-    .sensor-group-title { font-size: 14px; }
-    .sensor-group-description { color: var(--muted); }
+    .history-list { padding: 0 20px; }
+    .history-empty { color: var(--muted); padding: 18px 0; }
+    .history-entry { border-bottom: 1px solid var(--line); }
+    .history-entry:last-child { border-bottom: 0; }
+    .history-entry summary {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center;
+      gap: 12px; padding: 14px 0; cursor: pointer; list-style: none;
+    }
+    .history-entry summary::-webkit-details-marker { display: none; }
+    .history-entry summary::after { content: "＋"; color: var(--muted); }
+    .history-entry[open] summary::after { content: "−"; }
+    .history-entry summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+    .history-title, .history-time { display: block; overflow-wrap: anywhere; }
+    .history-title { font-weight: 700; }
+    .history-time { margin-top: 3px; }
+    .history-status { font-size: 12px; color: var(--muted); text-align: right; }
+    .history-status.waiting_ir, .history-status.in_progress { color: #087d83; }
+    .history-status.completed { color: var(--green); }
+    .history-status.rejected, .history-status.incomplete, .history-status.interrupted, .history-status.cancelled { color: var(--red); }
+    .history-detail { padding: 0 0 16px; }
+    .history-detail ul { margin: 8px 0 12px; padding-inline-start: 22px; }
+    .history-detail .tiny { overflow-wrap: anywhere; }
+    .history-photos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 12px; margin-top: 12px; }
+    .history-photos:empty { display: none; }
+    .history-photos figure { margin: 0; }
+    .history-photos img { display: block; width: 100%; border-radius: 8px; background: #f3f6f9; }
+    .history-photos figcaption { margin-top: 5px; }
+    .history-actions { margin-top: 12px; }
+    .history-nav { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 10px 20px 16px; }
+    .history-nav[hidden] { display: none; }
+    .history-nav button { font-size: 13px; }
+    .camera-sensors {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, .65fr) minmax(0, 1fr);
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-light);
+    }
+    .camera-sensors > div + div { border-inline-start: 1px solid var(--line); padding-inline-start: 16px; }
+    .camera-sensors > div:not(:last-child) { padding-inline-end: 16px; }
+    .sensor-label { font-size: 12px; color: var(--muted); }
+    .sensor-value { display: block; margin-top: 3px; font-size: 14px; }
+    .sensor-connection { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin-top: 3px; }
+    .active-queue { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+    .active-queue[hidden] { display: none; }
+    .active-queue button { font-size: 13px; }
     .presence-state.on { color: var(--green); }
     .presence-state.off, .presence-state.stale { color: var(--amber); }
     .sensor-health.ready { color: var(--green); }
     .sensor-health.unavailable { color: var(--amber); }
-    .connection-info { margin-top: 12px; padding: 10px 11px; border-color: var(--line); }
-    .connection-info strong { color: var(--cyan); }
-    .event-list { padding: 12px 18px 18px; max-height: 390px; }
-    .event-item { background: #fbfcfe; border-color: var(--line); }
-    .event-item:hover { border-color: #75cdd0; }
-    .event-delete { color: #c84d5c; }
-    .event-delete:hover { color: #b83d4b; background: #fff0f1; border-color: #f2cbd0; }
-    .modal { background: rgba(27, 39, 57, .62); }
-    .modal-card { background: #fff; border-color: var(--line); }
-    .modal-close { background: #eef3f7; color: #395064; }
-    .modal-card img { background: #f3f6f9; }
     @media (max-width: 850px) {
       .camera-controls { grid-template-columns: minmax(0, 1fr) auto; }
     }
     @media (max-width: 560px) {
       .shell { padding: 22px 14px 36px; }
+      .camera-sensors { grid-template-columns: 1fr 1.5fr; gap: 8px 0; padding: 10px 14px; }
+      .camera-sensors .sensor-link { grid-column: 1 / -1; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+      .camera-sensors > .sensor-link + div { border-inline-start: 0; padding-inline-start: 0; }
       .camera-controls { grid-template-columns: 1fr; }
       .camera-controls button { width: 100%; }
       .camera-settings { grid-column: auto; }
@@ -272,19 +252,39 @@
     </header>
 
     <div id="error-box" class="error" role="alert"></div>
-    <div class="layout" style="margin-top: 16px">
-      <section>
-        <div class="panel">
+    <div class="layout">
+        <section class="panel" id="camera-panel" aria-labelledby="camera-title">
           <div class="panel-head">
             <div>
-              <h2>กล้องตรวจจับวัตถุ</h2>
+              <h2 id="camera-title">กล้องตรวจจับวัตถุ</h2>
               <p class="tiny" id="camera-caption">เลือกกล้อง แล้วเริ่มตรวจสอบ</p>
             </div>
             <span class="tiny" id="fps">-- FPS</span>
           </div>
+          <div class="camera-sensors" role="group" aria-labelledby="sensor-title">
+            <div class="sensor-link">
+              <p class="sensor-label" id="sensor-title">เซนเซอร์แท่นวาง</p>
+              <div class="sensor-connection">
+                <strong class="tiny" id="arduino-dot">● ออฟไลน์</strong>
+                <span class="tiny" id="arduino-caption">กำลังรอการเชื่อมต่อ</span>
+              </div>
+            </div>
+            <div>
+              <p class="sensor-label">IR Sensor</p>
+              <strong id="ir-ready" class="sensor-value sensor-health unavailable">OFF</strong>
+            </div>
+            <div>
+              <p class="sensor-label">สถานะอุปกรณ์</p>
+              <strong id="object-presence" class="sensor-value presence-state" aria-live="polite">ยังไม่มีข้อมูล</strong>
+            </div>
+          </div>
+          <div id="active-queue" class="active-queue" hidden>
+            <p id="active-queue-message" aria-live="polite"></p>
+            <button id="cancel-queue-button" type="button" class="danger">ยกเลิกการตรวจรับ</button>
+          </div>
           <div class="video-frame" id="video-frame">
             <video id="camera-preview" autoplay muted playsinline></video>
-            <img id="camera-stream" alt="ภาพจากกล้องพร้อมกรอบตรวจจับ">
+            <canvas id="camera-overlay" aria-hidden="true" hidden></canvas>
             <div class="video-empty">
               <div class="camera-icon">▣</div>
               <div id="video-message">เมื่อมีรายการและ IR พบอุปกรณ์ กล้องจะเปิดตรวจให้อัตโนมัติ</div>
@@ -318,94 +318,32 @@
           <p class="tiny" id="background-status" style="padding: 0 20px 16px">
             ตั้งฉากหลังว่างก่อนใช้งาน Unknown
           </p>
-        </div>
+        </section>
         <section class="panel queue-panel">
           <div class="panel-head">
             <div>
-              <h2>อุปกรณ์ที่จะตรวจ</h2>
-              <p class="tiny">เมื่อ IR พบอุปกรณ์ กล้องจะเปิดและตรวจให้อัตโนมัติ</p>
+              <h2>ประวัติคิวรับอุปกรณ์</h2>
+              <p class="tiny">กดที่คิวเพื่อดูรายการ รูป และผลตรวจรับ</p>
             </div>
-            <span class="tiny" id="armbot-item-count">0 รายการ</span>
           </div>
-          <div class="queue-body">
-            <div id="armbot-item-list" class="item-list" aria-live="polite">
-              <div class="item-empty">กำลังรอรายการที่จะหยิบ...</div>
-            </div>
+          <div id="history-list" class="history-list">
+            <p class="history-empty">กำลังโหลดประวัติคิว…</p>
+          </div>
+          <div id="history-nav" class="history-nav" hidden>
+            <button id="history-newer" class="secondary" type="button">คิวใหม่กว่า</button>
+            <button id="history-older" class="secondary" type="button">คิวเก่ากว่า</button>
           </div>
         </section>
-      </section>
-
-      <aside class="side">
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>เซนเซอร์แท่นวาง</h2>
-              <p class="tiny" id="arduino-caption">กำลังรอการเชื่อมต่อ</p>
-            </div>
-            <span class="tiny" id="arduino-dot">● ออฟไลน์</span>
-          </div>
-          <div class="sensor-body">
-            <div class="sensor-group">
-              <div class="sensor-group-head">
-                <div>
-                  <div class="sensor-group-title">IR Sensor</div>
-                  <p class="sensor-group-description">ตรวจจับอุปกรณ์ที่ถูกนำมาวาง</p>
-                </div>
-                <strong id="ir-ready" class="sensor-health unavailable">OFF</strong>
-              </div>
-              <div class="relay-row">
-                <span>สถานะอุปกรณ์</span>
-                <strong id="object-presence" class="presence-state" aria-live="polite">ยังไม่มีข้อมูล</strong>
-              </div>
-            </div>
-
-            <div class="connection-info"><span>การเชื่อมต่อ</span><strong>Wi-Fi</strong></div>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>วิธีใช้งาน</h2>
-              <p class="tiny">ตรวจรับอุปกรณ์ใน 3 ขั้นตอน</p>
-            </div>
-          </div>
-          <div class="system-body">
-            <div class="relay-row" style="border:0;padding-top:0"><span>1. รับรายการที่จะหยิบ</span><strong>อัตโนมัติ</strong></div>
-            <div class="relay-row"><span>2. IR พบอุปกรณ์</span><strong>เปิดกล้อง</strong></div>
-            <div class="relay-row"><span>3. ตรวจครบแล้ว</span><strong>บันทึกรูป</strong></div>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>ประวัติการตรวจรับ</h2>
-              <p class="tiny">กดรายการเพื่อดูรูปและเวลา</p>
-            </div>
-            <span class="tiny" id="event-count">0 รายการ</span>
-          </div>
-          <div id="event-list" class="event-list">
-            <div class="event-empty">ยังไม่มีประวัติการตรวจพบ</div>
-          </div>
-        </section>
-      </aside>
     </div>
   </main>
-  <div id="event-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="event-modal-title">
-    <div class="modal-card">
-      <div class="modal-head">
-        <h2 id="event-modal-title">รายละเอียดการตรวจพบ</h2>
-        <button class="modal-close" onclick="closeEvent()">ปิด</button>
-      </div>
-      <img id="event-image" alt="รูปอุปกรณ์ที่ตรวจพบ">
-      <div id="event-meta" class="modal-meta"></div>
-    </div>
-  </div>
   <script>
     const byId = (id) => document.getElementById(id);
     let cameraRunning = false;
     let browserStream = null;
+    let browserSessionId = null;
+    let observedCameraSessionId = null;
+    let activeQueueId = null;
+    let cancelInFlight = false;
     let cameraTestMode = false;
     let selectedCameraId = "";
     let frameTimer = null;
@@ -416,6 +354,14 @@
     let captureClosing = false;
     let receivingCameraStopInFlight = false;
     let errorTimer;
+    const historyRows = new Map();
+    const newerPages = [];
+    let historyCursor = null;
+    let olderCursor = null;
+    let historyLoading = false;
+    let statusLoading = false;
+    let currentHistoryRevision;
+    let renderedHistoryRevision;
 
     async function request(path, options = {}) {
       const headers = { ...(options.headers || {}) };
@@ -443,10 +389,14 @@
 
     function labelsText(labels) {
       const entries = Object.entries(labels || {});
-      return entries.length ? entries.map(([name, count]) => `${name} × ${count}`).join(" · ") : "ตรวจพบอุปกรณ์";
+      return entries.length ? entries.map(([name, count]) => `${name} × ${count}`).join(" · ") : "คิวรับอุปกรณ์";
     }
 
     function renderCamera(camera) {
+      observedCameraSessionId = camera.session_id;
+      if (browserSessionId && browserSessionId !== observedCameraSessionId) {
+        releaseBrowserCamera();
+      }
       cameraRunning = camera.running;
       cameraTestMode = cameraRunning
         && camera.record_events === false
@@ -471,8 +421,7 @@
         : "ยังไม่มีฉากหลังอ้างอิง · เปิดกล้องทดสอบขณะฉากว่างแล้วกดบันทึกฉากหลัง";
       byId("video-frame").classList.toggle("active", cameraRunning);
       if (!cameraRunning) {
-        byId("camera-stream").removeAttribute("src");
-        byId("video-frame").classList.remove("has-result");
+        byId("camera-overlay").hidden = true;
       }
       byId("camera-caption").textContent = cameraRunning
         ? (camera.receiving_job_id
@@ -505,17 +454,17 @@
       byId("arduino-dot").style.color = arduino.connected ? "var(--green)" : "var(--muted)";
       const irReady = byId("ir-ready");
       irReady.textContent = arduino.ir_ready ? "ON" : "OFF";
-      irReady.className = `sensor-health ${arduino.ir_ready ? "ready" : "unavailable"}`;
+      irReady.className = `sensor-value sensor-health ${arduino.ir_ready ? "ready" : "unavailable"}`;
       const presence = byId("object-presence");
       if (arduino.object_present === null) {
         presence.textContent = "ยังไม่มีข้อมูล";
-        presence.className = "presence-state";
+        presence.className = "sensor-value presence-state";
       } else if (!arduino.ir_ready) {
         presence.textContent = `${arduino.object_present ? "มีอุปกรณ์มาวางแล้ว" : "ยังไม่มีอุปกรณ์"} (ข้อมูลเก่า)`;
-        presence.className = "presence-state stale";
+        presence.className = "sensor-value presence-state stale";
       } else {
         presence.textContent = arduino.object_present ? "มีอุปกรณ์มาวางแล้ว" : "ยังไม่มีอุปกรณ์";
-        presence.className = `presence-state ${arduino.object_present ? "on" : "off"}`;
+        presence.className = `sensor-value presence-state ${arduino.object_present ? "on" : "off"}`;
       }
       const lastSeen = byId("last-seen");
       if (lastSeen) {
@@ -532,64 +481,107 @@
     function renderStatus(data) {
       renderCamera(data.camera);
       renderArduino(data.arduino);
-      renderRequestedItems(data.receiving);
+      renderActiveQueue(data.receiving?.job, data.arduino, data.camera);
       maybeStopReceivingCamera(data.camera, data.receiving);
-      maybeStartTriggeredCapture(data.arduino, data.receiving);
+      maybeStartTriggeredCapture(data.arduino, data.receiving, data.camera);
       const online = data.camera.running || data.arduino.connected;
       byId("system-status").textContent = online ? "ระบบออนไลน์" : "ระบบพร้อมใช้งาน";
       byId("system-status").classList.toggle("online", online);
+      currentHistoryRevision = data.history_revision;
+      if (!document.hidden && renderedHistoryRevision !== currentHistoryRevision) {
+        refreshHistory();
+      }
     }
 
-    function renderRequestedItems(receiving) {
-      const list = byId("armbot-item-list");
-      const job = receiving?.job;
-      const items = job?.inspection_items || Object.entries(job?.progress || {})
-        .map(([name, progress]) => ({ name, ...progress }));
-      const requestedCount = items.reduce(
-        (total, item) => total + Number(item.requested || 0),
-        0
-      );
-      byId("armbot-item-count").textContent = job
-        ? `${requestedCount} ชิ้น`
-        : "0 รายการ";
-      list.replaceChildren();
-      if (!job || !items.length) {
-        list.innerHTML = '<div class="item-empty">ยังไม่มีรายการที่จะหยิบ</div>';
+    function renderActiveQueue(job, arduino, camera) {
+      const active = job && ["waiting_ir", "in_progress"].includes(job.status);
+      byId("active-queue").hidden = !active;
+      activeQueueId = active ? job.history_id : null;
+      byId("cancel-queue-button").disabled = cancelInFlight;
+      if (!active) return;
+      let message = job.message;
+      if (job.status === "waiting_ir") {
+        if (!arduino.ir_ready) message = "รอสัญญาณจากเซนเซอร์แท่นวาง";
+        else if (!arduino.object_present) message = "รอวางอุปกรณ์บนแท่น";
+        else if (!arduino.capture_pending) message = "นำอุปกรณ์เดิมออกจากแท่นก่อนเริ่มรอบใหม่";
+        else if (!camera.background_ready) message = "รอบันทึกฉากหลังว่างก่อนเปิดกล้องตรวจ";
+        else message = "พบอุปกรณ์บนแท่น · กำลังเตรียมกล้อง";
+      } else if (job.progress?.Unknown && job.progress.Unknown.detected < job.progress.Unknown.requested) {
+        message = (job.unknown_reference_count || 0) < job.progress.Unknown.requested
+          ? "รอภาพอ้างอิงที่ใช้ตรวจได้จาก ARMbot"
+          : "กำลังเทียบภาพอุปกรณ์ · ผลตรวจยังไม่ครบ";
+      }
+      const status = byId("active-queue-message");
+      if (status.textContent !== message) status.textContent = message;
+    }
+
+    async function cancelActiveQueue() {
+      const queueId = activeQueueId;
+      if (!queueId || cancelInFlight) return;
+      const reason = window.prompt("ระบุเหตุผลที่ยกเลิกการตรวจรับ");
+      if (reason === null) return;
+      if (!reason.trim() || reason.trim().length > 200) {
+        showError("กรุณาระบุเหตุผล 1–200 ตัวอักษร");
         return;
       }
-      for (const item of items) {
-        const row = document.createElement("div");
-        const isActive = ["waiting_ir", "in_progress"].includes(job.status);
-        row.className = `item-row${isActive ? " active" : ""}`;
-        const details = document.createElement("div");
-        const nameElement = document.createElement("div");
-        nameElement.className = "item-name";
-        nameElement.textContent = item.name;
-        const meta = document.createElement("div");
-        meta.className = "item-meta";
-        meta.textContent = `${item.detected || 0}/${item.requested} ชิ้น`;
-        details.append(nameElement, meta);
-        const badge = document.createElement("div");
-        badge.className = `item-badge${isActive ? " active" : ""}`;
-        badge.textContent = job.status === "completed"
-          ? "ตรวจครบแล้ว"
-          : job.status === "incomplete"
-            ? "ตรวจไม่ครบ"
-            : job.status === "in_progress"
-              ? "กำลังตรวจ"
-              : "รอ IR";
-        row.append(details, badge);
-        list.append(row);
+      cancelInFlight = true;
+      const button = byId("cancel-queue-button");
+      button.disabled = true;
+      try {
+        const result = await request(`/api/receiving-history/${queueId}/cancel`, {
+          method: "POST",
+          body: JSON.stringify({ reason: reason.trim() })
+        });
+        renderCamera(result.camera);
+        byId("active-queue").hidden = true;
+      } catch (error) {
+        showError(`ยกเลิกคิวไม่ได้: ${error.message}`);
+      } finally {
+        cancelInFlight = false;
+        button.disabled = false;
+        await refreshStatus();
       }
     }
 
     async function refreshStatus() {
+      if (statusLoading) return;
+      statusLoading = true;
       try {
         renderStatus(await request("/api/status"));
       } catch (error) {
         byId("system-status").textContent = "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้";
         showError(error.message);
+      } finally {
+        statusLoading = false;
       }
+    }
+
+    function drawCameraOverlay({ width, height, boxes }) {
+      const overlay = byId("camera-overlay");
+      if (overlay.width !== width) overlay.width = width;
+      if (overlay.height !== height) overlay.height = height;
+      const context = overlay.getContext("2d");
+      context.clearRect(0, 0, width, height);
+      const fontSize = Math.max(13, Math.round(width / 55));
+      context.font = `600 ${fontSize}px sans-serif`;
+      context.textBaseline = "top";
+      context.lineWidth = Math.max(2, width / 400);
+      for (const box of boxes) {
+        const color = box.confidence === null ? "#ffc646" : "#61e3a3";
+        const label = box.confidence === null
+          ? box.label
+          : `${box.label} ${Math.round(box.confidence * 100)}%`;
+        context.strokeStyle = color;
+        context.fillStyle = color;
+        context.strokeRect(box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1);
+        const labelWidth = Math.min(width, context.measureText(label).width + 10);
+        const x = Math.max(0, Math.min(width - labelWidth, box.x1));
+        const y = Math.max(0, box.y1 - fontSize - 6);
+        context.fillRect(x, y, labelWidth, fontSize + 6);
+        context.fillStyle = "#111827";
+        context.fillText(label, x + 5, y + 3, labelWidth - 10);
+      }
+      overlay.hidden = !boxes.length;
     }
 
     async function maybeStopReceivingCamera(camera, receiving) {
@@ -612,7 +604,8 @@
     }
 
     async function sendCameraFrame() {
-      if (!cameraRunning || frameInFlight) return;
+      const sessionId = browserSessionId;
+      if (!cameraRunning || !sessionId || frameInFlight) return;
       const video = byId("camera-preview");
       if (video.readyState < 2 || !video.videoWidth) return;
       frameInFlight = true;
@@ -626,18 +619,22 @@
         if (!blob) throw new Error("สร้างภาพจากกล้องไม่ได้");
         const form = new FormData();
         form.append("file", blob, "camera.jpg");
-        const response = await fetch("/api/camera/frame", { method: "POST", body: form });
+        if (browserSessionId !== sessionId) return;
+        const response = await fetch(`/api/camera/frame?session_id=${sessionId}&preview=false`, { method: "POST", body: form });
+        if (response.status === 429) return;
         const payload = await response.json();
+        if (browserSessionId !== sessionId) return;
         if (!response.ok) throw new Error(payload.detail || "ส่งภาพไปประมวลผลไม่ได้");
-        byId("camera-stream").src = payload.image;
-        byId("video-frame").classList.add("has-result");
         renderCamera(payload.camera);
+        if (browserSessionId === sessionId) drawCameraOverlay(payload);
         if (payload.camera.capture_completed && !captureClosing) {
           captureClosing = true;
-          await stopBrowserCamera();
-          captureClosing = false;
-          await refreshStatus();
-          await refreshEvents();
+          try {
+            await stopBrowserCamera();
+            await refreshStatus();
+          } finally {
+            captureClosing = false;
+          }
         }
       } catch (error) {
         showError(error.message);
@@ -739,33 +736,58 @@
           height: { ideal: 720 }
         };
         if (deviceId) videoConstraints.deviceId = { exact: deviceId };
-        browserStream = await navigator.mediaDevices.getUserMedia({
+        const stream = await navigator.mediaDevices.getUserMedia({
           video: videoConstraints,
           audio: false
         });
+        let current;
+        try {
+          current = (await request("/api/status")).camera;
+        } catch (error) {
+          stream.getTracks().forEach((track) => track.stop());
+          throw error;
+        }
+        if (current.session_id !== cameraState.session_id || !current.running) {
+          stream.getTracks().forEach((track) => track.stop());
+          renderCamera(current);
+          return false;
+        }
+        browserStream = stream;
+        browserSessionId = cameraState.session_id;
         const video = byId("camera-preview");
         video.srcObject = browserStream;
         await video.play();
+        if (browserSessionId !== cameraState.session_id) return false;
         cameraRunning = true;
-        cameraTestMode = !recordEvents;
+        cameraTestMode = !recordEvents && !receiveJobId;
         await refreshCameraList(deviceId);
         frameTimer = setInterval(sendCameraFrame, 700);
         await sendCameraFrame();
+        return true;
       } catch (error) {
-        await request("/api/camera/stop", { method: "POST" }).catch(() => {});
+        if (browserSessionId === cameraState.session_id) releaseBrowserCamera();
+        await request(`/api/camera/stop?session_id=${cameraState.session_id}`, { method: "POST" }).catch(() => {});
         throw new Error(`เปิดกล้องไม่ได้: ${error.message}`);
       }
     }
 
-    async function stopBrowserCamera() {
+    function releaseBrowserCamera() {
       if (frameTimer) clearInterval(frameTimer);
       frameTimer = null;
       if (browserStream) browserStream.getTracks().forEach((track) => track.stop());
       browserStream = null;
+      browserSessionId = null;
       byId("camera-preview").srcObject = null;
+      byId("camera-overlay").hidden = true;
       cameraRunning = false;
       cameraTestMode = false;
-      await request("/api/camera/stop", { method: "POST" });
+    }
+
+    async function stopBrowserCamera() {
+      const sessionId = browserSessionId || observedCameraSessionId;
+      releaseBrowserCamera();
+      const query = sessionId ? `?session_id=${sessionId}` : "";
+      await request(`/api/camera/stop${query}`, { method: "POST" });
     }
 
     async function toggleCamera() {
@@ -782,19 +804,20 @@
       }
     }
 
-    async function maybeStartTriggeredCapture(arduino, receiving) {
+    async function maybeStartTriggeredCapture(arduino, receiving, camera) {
       const job = receiving?.job;
-      if (!job || job.status !== "waiting_ir") return;
+      if (!job || job.status !== "waiting_ir" || !arduino.ir_ready || !arduino.object_present) return;
+      if (!camera.background_ready) return;
       const requestId = arduino.capture_request_id;
       if (!arduino.capture_pending || !requestId || requestId === lastCaptureRequestId) return;
-      if (captureRequestInFlight || Date.now() < captureRetryAt) return;
+      if (cancelInFlight || captureRequestInFlight || Date.now() < captureRetryAt) return;
       captureRequestInFlight = true;
       try {
         if (cameraRunning) {
           if (!cameraTestMode) return;
           await stopBrowserCamera();
         }
-        await startBrowserCamera(requestId, false, job.job_id);
+        if (!await startBrowserCamera(requestId, false, job.job_id)) return;
         await request("/api/capture/ack", {
           method: "POST",
           body: JSON.stringify({ request_id: requestId })
@@ -808,94 +831,179 @@
       }
     }
 
-    async function refreshEvents() {
-      try {
-        const result = await request("/api/events?limit=50");
-        const events = result.events || [];
-        byId("event-count").textContent = `${events.length} รายการ`;
-        const list = byId("event-list");
-        list.replaceChildren();
-        if (!events.length) {
-          list.innerHTML = '<div class="event-empty">ยังไม่มีประวัติการตรวจพบ</div>';
-          return;
+    const queueStatusLabels = {
+      waiting_ir: "รอวางอุปกรณ์",
+      in_progress: "กำลังตรวจ",
+      completed: "ยืนยันรับแล้ว",
+      cancelled: "ยกเลิกแล้ว",
+      incomplete: "ตรวจไม่ครบ",
+      rejected: "คิวไม่ถูกเริ่ม",
+      interrupted: "การตรวจถูกขัดจังหวะ"
+    };
+
+    function historyElement(tag, className, value = "") {
+      const element = document.createElement(tag);
+      element.className = className;
+      element.textContent = value;
+      return element;
+    }
+
+    function createHistoryRow(id) {
+      const element = historyElement("details", "history-entry");
+      const summary = document.createElement("summary");
+      const description = document.createElement("span");
+      const title = historyElement("span", "history-title");
+      const time = historyElement("time", "history-time tiny");
+      const status = historyElement("span", "history-status");
+      const detail = historyElement("div", "history-detail");
+      description.append(title, time);
+      summary.append(description, status);
+      element.append(summary, detail);
+      const row = { id, element, title, time, status, detail };
+      element.addEventListener("toggle", () => {
+        if (element.open && row.loadedVersion !== row.version) loadQueueDetail(row);
+      });
+      return row;
+    }
+
+    function renderHistory(queues) {
+      const list = byId("history-list");
+      const ids = new Set(queues.map((queue) => queue.id));
+      for (const [id, row] of historyRows) {
+        if (!ids.has(id)) {
+          row.element.remove();
+          historyRows.delete(id);
         }
-        for (const event of events) {
-          const item = document.createElement("div");
-          item.className = "event-item";
-          const openButton = document.createElement("button");
-          openButton.className = "event-open";
-          openButton.type = "button";
-          openButton.onclick = () => openEvent(event.id);
-          const image = document.createElement("img");
-          image.className = "event-thumb";
-          image.src = `${event.image_url}?v=${event.id}`;
-          image.alt = "รูปอุปกรณ์ที่ตรวจพบ";
-          const details = document.createElement("div");
-          const time = document.createElement("div");
-          time.className = "event-time";
-          time.textContent = formatEventTime(event.detected_at);
-          const labels = document.createElement("div");
-          labels.className = "event-labels";
-          labels.textContent = labelsText(event.labels);
-          details.append(time, labels);
-          openButton.append(image, details);
-          const deleteButton = document.createElement("button");
-          deleteButton.className = "event-delete";
-          deleteButton.type = "button";
-          deleteButton.textContent = "×";
-          deleteButton.title = "ลบรูปและประวัติรายการนี้";
-          deleteButton.setAttribute("aria-label", "ลบรูปและประวัติรายการนี้");
-          deleteButton.onclick = (clickEvent) => {
-            clickEvent.stopPropagation();
-            deleteEvent(event.id, deleteButton);
+      }
+      if (!queues.length) {
+        list.replaceChildren(historyElement("p", "history-empty", "ยังไม่มีประวัติคิวรับอุปกรณ์"));
+        return;
+      }
+      list.querySelector(".history-empty")?.remove();
+      queues.forEach((queue, index) => {
+        const row = historyRows.get(queue.id) || createHistoryRow(queue.id);
+        historyRows.set(queue.id, row);
+        row.version = queue.updated_at;
+        row.title.textContent = labelsText(queue.requested);
+        row.time.dateTime = queue.received_at;
+        const shortCode = queue.job_id.length > 14 ? `${queue.job_id.slice(0, 10)}…` : queue.job_id;
+        row.time.textContent = `${formatEventTime(queue.received_at)} · คิว ${shortCode}`;
+        row.time.title = queue.job_id;
+        row.status.className = `history-status ${queue.status}`;
+        row.status.textContent = queueStatusLabels[queue.status];
+        if (list.children[index] !== row.element) {
+          list.insertBefore(row.element, list.children[index] || null);
+        }
+        if (row.element.open && row.loadedVersion !== row.version) loadQueueDetail(row);
+      });
+    }
+
+    async function refreshHistory(cursor = historyCursor, direction = "") {
+      if (historyLoading) return;
+      historyLoading = true;
+      const requestedRevision = currentHistoryRevision;
+      try {
+        const query = cursor === null ? "" : `?before_id=${cursor}`;
+        const result = await request(`/api/receiving-history${query}`);
+        renderHistory(result.queues);
+        renderedHistoryRevision = requestedRevision;
+        if (direction === "older") newerPages.push(historyCursor);
+        if (direction === "newer") newerPages.pop();
+        historyCursor = cursor;
+        olderCursor = result.next_before_id;
+        byId("history-nav").hidden = !newerPages.length && olderCursor === null;
+        byId("history-newer").disabled = !newerPages.length;
+        byId("history-older").disabled = olderCursor === null;
+      } catch (error) {
+        showError(`โหลดประวัติคิวไม่ได้: ${error.message}`);
+      } finally {
+        historyLoading = false;
+      }
+    }
+
+    function addHistoryPhoto(gallery, url, caption) {
+      const figure = document.createElement("figure");
+      const image = document.createElement("img");
+      image.src = url;
+      image.alt = caption;
+      image.addEventListener("error", () => {
+        image.replaceWith(historyElement("p", "tiny", "เปิดรูปนี้ไม่ได้"));
+      }, { once: true });
+      figure.append(image, historyElement("figcaption", "tiny", caption));
+      gallery.append(figure);
+    }
+
+    async function loadQueueDetail(row) {
+      if (row.loading) return;
+      row.loading = true;
+      if (!row.loadedVersion) {
+        row.detail.replaceChildren(historyElement("p", "tiny", "กำลังโหลดรายละเอียด…"));
+      }
+      try {
+        const queue = await request(`/api/receiving-history/${row.id}`);
+        const identity = historyElement("p", "tiny", `รหัสคิว ${queue.job_id}`);
+        const message = historyElement("p", "tiny", queue.message);
+        const items = document.createElement("ul");
+        for (const [name, quantity] of Object.entries(queue.requested)) {
+          const item = document.createElement("li");
+          item.textContent = `${name} · ตรวจพบ ${queue.detected[name] || 0}/${quantity} ชิ้น`;
+          items.append(item);
+        }
+        const gallery = historyElement("div", "history-photos");
+        queue.pick_images.forEach((url, index) => {
+          addHistoryPhoto(gallery, url, `รูปตอนหยิบจาก ARMbot · ${index + 1}`);
+        });
+        if (queue.inspection_image) {
+          addHistoryPhoto(gallery, queue.inspection_image, `รูปยืนยันการรับ · ${formatEventTime(queue.detected_at)}`);
+        }
+        row.detail.replaceChildren(identity, message);
+        if (items.childElementCount) row.detail.append(items);
+        row.detail.append(gallery);
+        if (!gallery.childElementCount) {
+          row.detail.append(historyElement("p", "tiny", "คิวนี้ยังไม่มีรูป"));
+        }
+        if (queue.event_id !== null) {
+          const remove = historyElement("button", "danger history-actions", "ลบรูปผลตรวจ");
+          remove.type = "button";
+          remove.onclick = async () => {
+            if (!window.confirm("ลบรูปผลตรวจของคิวนี้ใช่ไหม?")) return;
+            remove.disabled = true;
+            try {
+              await request(`/api/events/${queue.event_id}`, { method: "DELETE" });
+              await loadQueueDetail(row);
+              await refreshStatus();
+            } catch (error) {
+              remove.disabled = false;
+              showError(error.message);
+            }
           };
-          item.append(openButton, deleteButton);
-          list.append(item);
+          row.detail.append(remove);
         }
+        row.loadedVersion = queue.updated_at;
       } catch (error) {
-        showError(error.message);
+        row.detail.replaceChildren(historyElement("p", "tiny", `โหลดรายละเอียดไม่ได้: ${error.message}`));
+        row.loadedVersion = null;
+      } finally {
+        row.loading = false;
       }
     }
 
-    async function deleteEvent(eventId, button) {
-      if (!window.confirm("ลบรูปและประวัติรายการนี้ใช่หรือไม่?")) return;
-      button.disabled = true;
-      try {
-        await request(`/api/events/${eventId}`, { method: "DELETE" });
-        closeEvent();
-        await refreshEvents();
-      } catch (error) {
-        button.disabled = false;
-        showError(error.message);
-      }
-    }
-
-    async function openEvent(eventId) {
-      try {
-        const event = await request(`/api/events/${eventId}`);
-        byId("event-image").src = `${event.image_url}?v=${event.id}`;
-        byId("event-meta").textContent = `${formatEventTime(event.detected_at)} · ${labelsText(event.labels)}`;
-        byId("event-modal").classList.add("visible");
-      } catch (error) {
-        showError(error.message);
-      }
-    }
-
-    function closeEvent() {
-      byId("event-modal").classList.remove("visible");
-    }
-
-    byId("event-modal").addEventListener("click", (event) => {
-      if (event.target === byId("event-modal")) closeEvent();
+    byId("history-older").addEventListener("click", () => {
+      if (olderCursor !== null) refreshHistory(olderCursor, "older");
+    });
+    byId("cancel-queue-button").addEventListener("click", cancelActiveQueue);
+    byId("history-newer").addEventListener("click", () => {
+      if (newerPages.length) refreshHistory(newerPages.at(-1), "newer");
     });
     byId("camera-select").addEventListener("change", (event) => {
       selectedCameraId = event.target.value;
     });
     refreshCameraList();
     refreshStatus();
-    refreshEvents();
     setInterval(refreshStatus, 1000);
-    setInterval(refreshEvents, 5000);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) refreshStatus();
+    });
   </script>
 </body>
 </html>
