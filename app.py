@@ -1193,11 +1193,19 @@ class MqttReceivingService:
         jobs = payload.get("jobs") if isinstance(payload, dict) else None
         if not isinstance(jobs, list):
             return
+        terminal_jobs = []
+        for job in jobs:
+            if not isinstance(job, dict):
+                continue
+            state = job.get("state")
+            message = job.get("message")
+            # ARMbot reports a stopped running job as failed, even when the user stopped it.
+            if state == "failed" and isinstance(message, str) and message.strip().casefold() == "stopped":
+                terminal_jobs.append({**job, "state": "cancelled"})
+            elif state in ("done", "cancelled"):
+                terminal_jobs.append(job)
         with self._lock:
-            self._armbot_terminal_jobs = [
-                job for job in jobs
-                if isinstance(job, dict) and job.get("state") in ("done", "cancelled")
-            ]
+            self._armbot_terminal_jobs = terminal_jobs
         self._sync_armbot_job_status()
 
     def _sync_armbot_job_status(self) -> None:
