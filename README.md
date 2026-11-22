@@ -162,7 +162,7 @@ Dashboard จะส่ง JSON หนึ่งข้อความเมื่�
 
 ```powershell
 py -m pip install -r requirements.txt
-py train.py --name iot-components-v3
+py train.py --epochs 100 --patience 100 --name iot-components-v4
 ```
 
 สคริปต์อ่าน `datasets/data.yaml` และใช้ split `train`, `valid` และ `test`
@@ -173,6 +173,7 @@ YOLO detection โดยเก็บทั้งสี่คลาส รวม 
 ไม่นำกรอบ QR ไปนับเป็นวัตถุ `Unknown` ชุด `test` จะไม่ถูกใช้ฝึกหรือเลือก checkpoint
 แต่ใช้ประเมิน best checkpoint หลังฝึก ค่าเริ่มต้นฝึก 100 epochs,
 ขนาดภาพ 512 และหยุดก่อนกำหนดเมื่อ validation ไม่ดีขึ้น 20 epochs
+หากต้องการให้ฝึกครบตามจำนวน epochs ที่กำหนด ให้ตั้ง `--patience` เท่ากับ `--epochs`
 
 ก่อนใช้ `Unknown` ให้เลือกกล้อง กดเปิดกล้องทดสอบขณะพื้นที่วางของว่าง แล้วกด
 “บันทึกฉากหลังว่าง” ภาพอ้างอิงเก็บไว้ที่ `data/background_reference.jpg`

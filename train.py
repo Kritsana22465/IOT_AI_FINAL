@@ -300,11 +300,12 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--imgsz", type=int, default=512)
     parser.add_argument("--batch", type=int, default=8)
+    parser.add_argument("--patience", type=int, default=20)
     parser.add_argument("--device", default=None)
     parser.add_argument("--name", default="iot-components-v3")
     args = parser.parse_args()
-    if args.epochs < 1 or args.imgsz < 1 or args.batch < 1:
-        parser.error("--epochs, --imgsz, and --batch must be positive")
+    if args.epochs < 1 or args.imgsz < 1 or args.batch < 1 or args.patience < 1:
+        parser.error("--epochs, --imgsz, --batch, and --patience must be positive")
 
     project = ROOT / "runs" / "object-detection"
     with tempfile.TemporaryDirectory(prefix="iot-yolo-") as temporary_directory:
@@ -336,7 +337,7 @@ def main() -> None:
             batch=args.batch,
             workers=0,
             device=args.device,
-            patience=20,
+            patience=args.patience,
             seed=42,
             project=str(project),
             name=args.name,
