@@ -100,6 +100,9 @@ MQTT_QUEUE_TOPIC = os.getenv("MQTT_QUEUE_TOPIC", "armbot-010eb21b/cmd/queue").st
 MQTT_EVENT_TOPIC = os.getenv("MQTT_EVENT_TOPIC", "armbot-010eb21b/event").strip()
 MQTT_STATUS_TOPIC = os.getenv("MQTT_STATUS_TOPIC", "armbot-010eb21b/status").strip()
 MQTT_ARMBOT_PREFIX = MQTT_QUEUE_TOPIC.rsplit("/cmd/", 1)[0]
+MQTT_RESULT_TOPIC = (
+    os.getenv("MQTT_RESULT_TOPIC", "").strip() or f"{MQTT_ARMBOT_PREFIX}/inspection/result"
+)
 MQTT_ARMBOT_EVENT_TOPIC = f"{MQTT_ARMBOT_PREFIX}/event"
 MQTT_UNKNOWN_TOPIC = f"{MQTT_ARMBOT_PREFIX}/unknown"
 MQTT_UNKNOWN_IMAGE_TOPIC = f"{MQTT_UNKNOWN_TOPIC}/image"
@@ -210,6 +213,19 @@ class EventStore:
             )
             connection.execute(
                 """
+                ALTER TABLE receiving_history
+                ADD COLUMN IF NOT EXISTS mqtt_result_pending BOOLEAN NOT NULL DEFAULT FALSE
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS receiving_mqtt_pending_idx
+                ON receiving_history (id)
+                WHERE mqtt_result_pending AND event_id IS NOT NULL
+                """
+            )
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS receiving_pick_images (
                     id BIGSERIAL PRIMARY KEY,
                     queue_id BIGINT NOT NULL REFERENCES receiving_history(id),
@@ -311,7 +327,8 @@ class EventStore:
                         """
                         UPDATE receiving_history
                         SET event_id = %s, detected = %s, status = 'completed',
-                            message = 'รับของเรียบร้อย', updated_at = NOW()
+                            message = 'รับของเรียบร้อย', updated_at = NOW(),
+                            mqtt_result_pending = TRUE
                         WHERE id = %s AND status = 'in_progress'
                         """,
                         (row["id"], Json(labels), queue_id),
@@ -326,6 +343,30 @@ class EventStore:
         if queue_id is not None:
             self.history_revision = uuid.uuid4().hex
         return self._payload(row)
+
+    def pending_mqtt_result(self) -> dict[str, Any] | None:
+        with self.connection() as connection:
+            return connection.execute(
+                """
+                SELECT q.id AS queue_id, q.job_id, q.armbot_job_id, q.event_id,
+                       q.requested, q.detected, e.detected_at
+                FROM receiving_history q
+                JOIN device_events e ON e.id = q.event_id
+                WHERE q.mqtt_result_pending AND q.event_id IS NOT NULL
+                ORDER BY q.id
+                LIMIT 1
+                """
+            ).fetchone()
+
+    def acknowledge_mqtt_result(self, queue_id: int, event_id: int) -> None:
+        with self.connection() as connection:
+            connection.execute(
+                """
+                UPDATE receiving_history SET mqtt_result_pending = FALSE
+                WHERE id = %s AND event_id = %s
+                """,
+                (queue_id, event_id),
+            )
 
     def add_queue(self, job: dict[str, Any]) -> int:
         with self.connection() as connection:
@@ -563,6 +604,9 @@ class MqttReceivingService:
         self._test_topics_seen: set[str] = set()
         self._mqtt_connected = False
         self._mqtt_error: str | None = None
+        self._results_ready = threading.Event()
+        self._results_stop = threading.Event()
+        self._results_worker: threading.Thread | None = None
 
     def start(self) -> None:
         if not all(
@@ -571,9 +615,19 @@ class MqttReceivingService:
                 MQTT_QUEUE_TOPIC,
                 MQTT_EVENT_TOPIC,
                 MQTT_STATUS_TOPIC,
+                MQTT_RESULT_TOPIC,
             )
         ):
             raise RuntimeError("MQTT host and topic settings must not be empty")
+        if (
+            MQTT_RESULT_TOPIC in (
+                MQTT_QUEUE_TOPIC, MQTT_EVENT_TOPIC, MQTT_STATUS_TOPIC,
+                MQTT_ARMBOT_EVENT_TOPIC, MQTT_UNKNOWN_TOPIC, MQTT_UNKNOWN_IMAGE_TOPIC,
+            )
+            or MQTT_RESULT_TOPIC.startswith(f"{MQTT_ARMBOT_PREFIX}/cmd/")
+            or any(character in MQTT_RESULT_TOPIC for character in ("#", "+", "\0"))
+        ):
+            raise RuntimeError("MQTT_RESULT_TOPIC must be a separate result topic")
         if not 1 <= MQTT_PORT <= 65535:
             raise RuntimeError("MQTT_PORT must be between 1 and 65535")
         if MQTT_TRANSPORT not in {"tcp", "websockets"}:
@@ -607,12 +661,25 @@ class MqttReceivingService:
         try:
             client.connect_async(MQTT_HOST, MQTT_PORT, keepalive=30)
             client.loop_start()
+            self._results_stop.clear()
+            self._results_worker = threading.Thread(
+                target=self._publish_results,
+                args=(client,),
+                name="mqtt-inspection-results",
+                daemon=True,
+            )
+            self._results_worker.start()
         except (OSError, ValueError) as error:
             with self._lock:
                 self._mqtt_error = str(error)
             LOGGER.exception("Could not start MQTT client")
 
     def stop(self) -> None:
+        self._results_stop.set()
+        self._results_ready.set()
+        if self._results_worker is not None:
+            self._results_worker.join(timeout=6)
+            self._results_worker = None
         client = self._client
         if client is not None:
             client.disconnect()
@@ -769,6 +836,8 @@ class MqttReceivingService:
 
         if job_state is not None:
             self._publish_job_state(job_state, event_type)
+            if event_type == "completed":
+                self._results_ready.set()
 
     def abort_camera(self, job_id: str) -> None:
         with self._lock:
@@ -846,6 +915,7 @@ class MqttReceivingService:
             )
         if not self._mqtt_connected:
             LOGGER.error(self._mqtt_error)
+        self._results_ready.set()
 
     def _on_disconnect(
         self,
@@ -946,9 +1016,7 @@ class MqttReceivingService:
                     request,
                     item_id=item_id.strip().lower(),
                     source=source,
-                    armbot_job_id=self._explicit_armbot_job_id(payload)
-                    if yolo_class == "unknown"
-                    else None,
+                    armbot_job_id=self._explicit_armbot_job_id(payload),
                 )
                 return
 
@@ -982,9 +1050,7 @@ class MqttReceivingService:
             request,
             item_id=item_id,
             source=payload.get("source", "mqtt"),
-            armbot_job_id=self._explicit_armbot_job_id(payload)
-            if any(item.equipment == "unknown" for item in request.items)
-            else None,
+            armbot_job_id=self._explicit_armbot_job_id(payload),
         )
 
     @staticmethod
@@ -1346,6 +1412,55 @@ class MqttReceivingService:
         )
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
             LOGGER.error("Could not publish MQTT status: code %s", result.rc)
+
+    def _publish_results(self, client: mqtt.Client) -> None:
+        while not self._results_stop.is_set():
+            self._results_ready.wait()
+            self._results_ready.clear()
+            while not self._results_stop.is_set() and client.is_connected():
+                try:
+                    result = self._event_store.pending_mqtt_result()
+                    if result is None:
+                        break
+                    self._send_inspection_result(client, result)
+                except Exception:
+                    LOGGER.exception("Could not deliver queued MQTT inspection result")
+                    if not self._results_stop.wait(5):
+                        self._results_ready.set()
+                    break
+
+    def _send_inspection_result(self, client: mqtt.Client, row: dict[str, Any]) -> None:
+        event_id = row["event_id"]
+        image = self._event_store.image_bytes(event_id)
+        if image is None:
+            if self._event_store.get(event_id) is None:
+                return  # The user deleted the evidence after we read the pending row.
+            raise RuntimeError(f"Missing MQTT inspection image for event {event_id}")
+        payload = {
+            "schema_version": 1,
+            "type": "inspection_result",
+            "status": "completed",
+            "job_id": row["job_id"],
+            "armbot_job_id": row["armbot_job_id"],
+            "event_id": event_id,
+            "completed_at": row["detected_at"].isoformat(),
+            "requested": row["requested"],
+            "detected": row["detected"],
+            "image": {
+                "content_type": "image/jpeg",
+                "encoding": "base64",
+                "data": base64.b64encode(image).decode("ascii"),
+            },
+        }
+        message = client.publish(
+            MQTT_RESULT_TOPIC, json.dumps(payload, ensure_ascii=False), qos=1, retain=False
+        )
+        if message.rc != mqtt.MQTT_ERR_SUCCESS:
+            raise RuntimeError(f"MQTT result publish failed: {message.rc}")
+        message.wait_for_publish(timeout=5)
+        if not message.is_published():
+            raise RuntimeError(f"MQTT broker has not acknowledged event {event_id}")
+        self._event_store.acknowledge_mqtt_result(row["queue_id"], event_id)
 
 
 def find_unknown_regions(

@@ -88,6 +88,51 @@ event `completed` พร้อม status `ready` งานจะรอ IR แล
 หรือเป็น GitHub Actions secrets ชื่อเดียวกันสำหรับ deploy; ไม่ใส่ credential
 ลงใน source code โดยค่าเริ่มต้นใช้ WebSocket + TLS ที่พอร์ต 8884 และ path `/mqtt`
 
+### รับผลตรวจและรูปจาก Dashboard
+
+ให้ฝั่ง ARMbot subscribe **`armbot-010eb21b/inspection/result`** ด้วย QoS 1
+บน broker เดียวกับที่ใช้ส่งคิว หรือตั้ง `MQTT_RESULT_TOPIC` เพื่อใช้ชื่อ topic อื่น
+Dashboard จะส่ง JSON หนึ่งข้อความเมื่อผลตรวจและรูปยืนยันถูกบันทึกสำเร็จ
+และจะลองส่งใหม่หาก broker ยังไม่ยืนยัน การยกเลิกคิวและการเปิดกล้องทดสอบ
+จะไม่สร้างข้อความผลตรวจสำเร็จ
+
+ส่ง `job_id` ที่ไม่ซ้ำกันมากับคิว `cmd/queue` เพื่อให้ฝั่งรับเชื่อมผลกับคิวเดิมได้ เช่น
+
+```json
+{"job_id":"armbot-2026-0007","item_id":"relay","count":1,"source":"armbot"}
+```
+
+ตัวอย่างข้อความตอบกลับ:
+
+```json
+{
+  "schema_version": 1,
+  "type": "inspection_result",
+  "status": "completed",
+  "job_id": "armbot-2026-0007",
+  "armbot_job_id": null,
+  "event_id": 57,
+  "completed_at": "2026-11-22T10:14:00+00:00",
+  "requested": {"Relay module": 1},
+  "detected": {"Relay module": 1},
+  "image": {
+    "content_type": "image/jpeg",
+    "encoding": "base64",
+    "data": "<JPEG encoded as Base64>"
+  }
+}
+```
+
+- `job_id` ตรงกับรหัสที่ส่งมา หรือเป็นรหัสที่ Dashboard สร้างให้เมื่อคิวไม่มีรหัส
+  `armbot_job_id` เป็นสตริงเมื่อทราบรหัสงานของ ARMbot และเป็น `null` เมื่อไม่ทราบ
+  หากมีเลขงานนี้ตอนส่งคิว ให้ส่ง `armbot_job_id` เป็นจำนวนเต็มในคำขอได้
+- แปลง `image.data` จาก Base64 เป็นไฟล์ JPEG ได้ทันที เช่น `Buffer.from(result.image.data, "base64")` ใน Node.js
+- MQTT ใช้ QoS 1 และ `retain=false` ให้ subscribe ก่อนเริ่มสั่งงาน และใช้
+  `event_id` เพื่อตัดข้อความซ้ำเมื่อได้ผลตรวจเดิมมากกว่าหนึ่งครั้ง
+  การยืนยันจาก broker หมายถึง broker รับข้อความแล้ว
+- Broker เริ่มต้นเป็นสาธารณะ ให้ใช้ภาพทดสอบที่แชร์ได้ หรือใช้ broker ส่วนตัว
+  ที่จำกัดสิทธิ์ publish/subscribe สำหรับรูปใช้งานจริง
+
 ## Deploy AWS ครั้งแรก
 
 สร้าง EC2 ด้วย Ubuntu 24.04 x86 และเลือก user data จากไฟล์ `infra/cloud-init-aws.yaml` เพื่อให้ติดตั้ง Docker อัตโนมัติ จากนั้นเปิด Security Group เฉพาะพอร์ต `22`, `80`, `443` และผูก Elastic IP เข้ากับ instance
