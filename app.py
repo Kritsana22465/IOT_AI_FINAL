@@ -232,7 +232,8 @@ class EventStore:
             connection.execute(
                 """
                 ALTER TABLE receiving_history
-                ADD COLUMN IF NOT EXISTS parent_queue_id BIGINT REFERENCES receiving_history(id)
+                ADD COLUMN IF NOT EXISTS parent_queue_id BIGINT REFERENCES receiving_history(id),
+                ADD COLUMN IF NOT EXISTS manual_scan BOOLEAN NOT NULL DEFAULT FALSE
                 """
             )
             connection.execute(
@@ -354,14 +355,13 @@ class EventStore:
                         UPDATE receiving_history
                         SET event_id = %s, detected = %s, status = %s,
                             message = %s, updated_at = NOW(),
-                            mqtt_result_pending = (parent_queue_id IS NULL OR %s)
+                            mqtt_result_pending = TRUE
                         WHERE id = %s AND status = 'in_progress'
                         """,
                         (
                             row["id"], Json(labels),
                             UNKNOWN_REVIEW_STATUS if review_photo else "completed",
                             UNKNOWN_REVIEW_MESSAGE if review_photo else "รับของเรียบร้อย",
-                            review_photo,
                             queue_id,
                         ),
                     )
@@ -381,7 +381,8 @@ class EventStore:
             return connection.execute(
                 """
                 SELECT q.id AS queue_id, COALESCE(parent.job_id, q.job_id) AS job_id,
-                       q.armbot_job_id, q.event_id,
+                       q.armbot_job_id, q.event_id, q.parent_queue_id,
+                       (q.manual_scan OR q.parent_queue_id IS NOT NULL) AS manual_scan,
                        q.status, q.requested, q.detected,
                        COALESCE(e.detected_at, q.updated_at) AS detected_at
                 FROM receiving_history q
@@ -429,14 +430,15 @@ class EventStore:
             row = connection.execute(
                 """
                 INSERT INTO receiving_history
-                    (job_id, armbot_job_id, status, requested, detected, message, parent_queue_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (job_id, armbot_job_id, status, requested, detected, message,
+                     parent_queue_id, manual_scan)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
                     job["job_id"], job.get("armbot_job_id"), job["status"],
                     Json(job["requested"]), Json(job["detected"]), job["message"],
-                    job.get("parent_queue_id"),
+                    job.get("parent_queue_id"), job.get("manual_scan", False),
                 ),
             ).fetchone()
         self.history_revision = uuid.uuid4().hex
@@ -448,13 +450,14 @@ class EventStore:
                 """
                 UPDATE receiving_history
                 SET status = %s, requested = %s, detected = %s, message = %s,
-                    armbot_job_id = %s, updated_at = NOW(),
+                    armbot_job_id = %s, updated_at = NOW(), manual_scan = %s,
                     mqtt_result_pending = mqtt_result_pending OR %s
                 WHERE id = %s
                 """,
                 (
                     job["status"], Json(job["requested"]), Json(job["detected"]),
-                    job["message"], job.get("armbot_job_id"), queue_result, job["history_id"],
+                    job["message"], job.get("armbot_job_id"), job.get("manual_scan", False),
+                    queue_result, job["history_id"],
                 ),
             )
         self.history_revision = uuid.uuid4().hex
@@ -976,9 +979,7 @@ class MqttReceivingService:
                 job_state = self._job_snapshot_locked(job)
                 event_type = "completed"
             elif (timeout_result := self._inspection_timeout(job, detected)) is not None:
-                self._event_store.update_queue(
-                    timeout_result, queue_result=job.get("parent_queue_id") is None
-                )
+                self._event_store.update_queue(timeout_result, queue_result=True)
                 job.update(timeout_result)
                 job_state = self._job_snapshot_locked(job)
                 event_type = job["status"]
@@ -1719,6 +1720,17 @@ class MqttReceivingService:
             payload.update(
                 result_id=f"queue:{row['queue_id']}", reason="camera_timeout", image=None
             )
+        if row["manual_scan"]:
+            payload["inspection_mode"] = "manual"
+            if row["parent_queue_id"] is not None:
+                payload["parent_queue_id"] = row["parent_queue_id"]
+            if topic == MQTT_RESULT_TOPIC:
+                # ทีมรับผล Manual Scan: subscribe MQTT_RESULT_TOPIC แล้วจับคู่คิวด้วย job_id
+                # หรือ armbot_job_id เก็บแต่ละรอบแยกด้วย result_id และใช้ค่านี้กรองข้อความซ้ำ
+                # เพิ่มตัวรับ not_found และ incomplete ที่บันทึกผลได้แม้ image=null
+                # ส่วน completed มี JPEG ใน image.data ให้ถอดออกจาก Base64
+                payload["result_id"] = f"queue:{row['queue_id']}"
+            # ทีมตรวจ Unknown ใช้ request_id เป็นรหัสรอบและส่งภาพเข้าตัวตรวจตามทางเดิม
         message = client.publish(
             topic, json.dumps(payload, ensure_ascii=False), qos=1, retain=False
         )
