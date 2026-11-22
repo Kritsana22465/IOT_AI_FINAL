@@ -1663,6 +1663,7 @@ class CameraService:
         counts = {name: 0 for name in CLASS_NAMES}
         detections: list[DetectionBox] = []
         known_boxes: list[tuple[int, int, int, int]] = []
+        qr_boxes: list[tuple[int, int, int, int]] = []
         if result.boxes is not None:
             for class_id, box, confidence in zip(
                 result.boxes.cls.int().tolist(),
@@ -1670,6 +1671,9 @@ class CameraService:
                 result.boxes.conf.tolist(),
             ):
                 model_name = result.names[class_id].casefold()
+                if model_name == "qr":
+                    qr_boxes.append(tuple(box))
+                    continue
                 name = MODEL_CLASS_LABELS.get(model_name)
                 if name in counts and name != UNKNOWN_LABEL:
                     counts[name] += 1
@@ -1682,14 +1686,18 @@ class CameraService:
             boxes_to_draw = []
             label = UNKNOWN_LABEL
             if receiving_job_id is None:
-                boxes_to_draw = find_unknown_regions(frame, background_reference, known_boxes)
+                boxes_to_draw = find_unknown_regions(
+                    frame, background_reference, known_boxes + qr_boxes
+                )
             else:
                 mixed_order, references = self._receiving_service.unknown_references(
                     receiving_job_id
                 )
                 if references:
                     regions = find_unknown_regions(
-                        frame, background_reference, known_boxes if mixed_order else []
+                        frame,
+                        background_reference,
+                        known_boxes + qr_boxes if mixed_order else qr_boxes,
                     )
                     candidates = [
                         describe_object(frame[y : y + height, x : x + width])

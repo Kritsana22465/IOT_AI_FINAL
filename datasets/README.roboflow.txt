@@ -1,8 +1,8 @@
 
-IOT - v1 2026-11-20 5:11pm
+IOT_V2 - v1 datasets
 ==============================
 
-This dataset was exported via roboflow.com on November 20, 2026 at 10:14 AM GMT
+This dataset was exported via roboflow.com on November 22, 2026 at 4:30 AM GMT
 
 Roboflow is an end-to-end computer vision platform that helps you
 * collaborate with your team on computer vision projects
@@ -17,16 +17,19 @@ visit https://github.com/roboflow/notebooks
 
 To find over 100k other datasets and pre-trained models, visit https://universe.roboflow.com
 
-The dataset includes 123 images.
-IOT are annotated in YOLOv11 format.
+The dataset includes 233 images.
+IOT-V2 are annotated in YOLOv11 format.
 
 The following pre-processing was applied to each image:
 * Auto-orientation of pixel data (with EXIF-orientation stripping)
-* Resize to 640x640 (Fit (black edges))
+* Resize to 512x512 (Stretch)
 
 The following augmentation was applied to create 3 versions of each source image:
 * 50% probability of horizontal flip
+* 50% probability of vertical flip
+* Randomly crop between 0 and 28 percent of the image
 * Random rotation of between -15 and +15 degrees
-* Random brigthness adjustment of between -15 and +15 percent
+* Random brigthness adjustment of between -18 and +18 percent
+* Random exposure adjustment of between -12 and +12 percent
 
 

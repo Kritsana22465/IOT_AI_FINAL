@@ -13,6 +13,7 @@ from ultralytics.data.utils import check_det_dataset
 ROOT = Path(__file__).resolve().parent
 DATASET_ROOT = ROOT / "datasets"
 CLASS_NAMES = (
+    "QR",
     "relay_module",
     "triple_syringe",
     "ultrasonic_hc-sr04",
@@ -21,7 +22,9 @@ IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 SPLIT_NAMES = {"train": "train", "val": "val", "test": "test"}
 
 
-def parse_label_file(label_path: Path, class_count: int) -> tuple[list[str], int]:
+def parse_label_file(
+    label_path: Path, class_mapping: tuple[int, ...]
+) -> tuple[list[str], int]:
     normalized_rows = []
     polygon_count = 0
     for line_number, line in enumerate(
@@ -48,11 +51,12 @@ def parse_label_file(label_path: Path, class_count: int) -> tuple[list[str], int
             )
 
         source_class = values[0]
-        if not source_class.is_integer() or not 0 <= source_class < class_count:
+        if not source_class.is_integer() or not 0 <= source_class < len(class_mapping):
             raise ValueError(
                 f"{label_path}:{line_number}: class id must be an integer "
-                f"between 0 and {class_count - 1}"
+                f"between 0 and {len(class_mapping) - 1}"
             )
+        target_class = class_mapping[int(source_class)]
 
         if len(fields) == 5:
             center_x, center_y, width, height = values[1:]
@@ -111,14 +115,45 @@ def parse_label_file(label_path: Path, class_count: int) -> tuple[list[str], int
                 )
             center_x = (left + right) / 2
             center_y = (top + bottom) / 2
+        if len(fields) != 5:
             polygon_count += 1
 
         normalized_rows.append(
-            f"{int(source_class)} {center_x:.6f} {center_y:.6f} "
+            f"{target_class} {center_x:.6f} {center_y:.6f} "
             f"{width:.6f} {height:.6f}"
         )
 
     return normalized_rows, polygon_count
+
+
+def _class_mapping(
+    source_names: list[str] | dict[int, str],
+) -> tuple[int, ...]:
+    if isinstance(source_names, dict):
+        try:
+            ordered_names = [
+                source_names[index] for index in range(len(source_names))
+            ]
+        except KeyError as error:
+            raise ValueError(
+                "Dataset class IDs must be contiguous from zero"
+            ) from error
+    else:
+        ordered_names = list(source_names)
+
+    if len(set(ordered_names)) != len(ordered_names):
+        raise ValueError(f"Dataset class names must be unique, got {ordered_names}")
+
+    missing_classes = sorted(set(CLASS_NAMES) - set(ordered_names))
+    unsupported_classes = sorted(set(ordered_names) - set(CLASS_NAMES))
+    if missing_classes or unsupported_classes:
+        raise ValueError(
+            "Dataset classes do not match the application model mapping. "
+            f"Missing required classes: {missing_classes}; "
+            f"unsupported classes: {unsupported_classes}"
+        )
+
+    return tuple(CLASS_NAMES.index(name) for name in ordered_names)
 
 
 def _image_directories(split_value: str | list[str]) -> list[Path]:
@@ -139,13 +174,7 @@ def prepare_dataset(source: Path, destination: Path) -> dict[str, int]:
 
     dataset = check_det_dataset(str(data_yaml.resolve()))
     source_names = dataset["names"]
-    if isinstance(source_names, dict):
-        source_names = [source_names[index] for index in range(len(source_names))]
-    if tuple(source_names) != CLASS_NAMES:
-        raise ValueError(
-            "Dataset class order does not match the application model mapping. "
-            f"Expected {CLASS_NAMES}, got {tuple(source_names)}"
-        )
+    class_mapping = _class_mapping(source_names)
 
     if not dataset.get("train") or not dataset.get("val"):
         raise ValueError("Dataset YAML must define both train and val image splits")
@@ -201,7 +230,7 @@ def prepare_dataset(source: Path, destination: Path) -> dict[str, int]:
                 relative_stem = _without_suffix(relative_image)
                 relative_label = relative_stem
                 label_path = labels[relative_label]
-                rows, polygons = parse_label_file(label_path, len(CLASS_NAMES))
+                rows, polygons = parse_label_file(label_path, class_mapping)
                 counts["polygons"] += polygons
                 split_classes.update(int(row.split()[0]) for row in rows)
 
@@ -235,7 +264,9 @@ def prepare_dataset(source: Path, destination: Path) -> dict[str, int]:
     for split in ("train", "val", "test"):
         if not counts[split]:
             continue
-        missing_classes = sorted(set(range(len(CLASS_NAMES))) - classes_by_split[split])
+        missing_classes = sorted(
+            set(range(len(CLASS_NAMES))) - classes_by_split[split]
+        )
         if missing_classes:
             missing_names = [CLASS_NAMES[class_id] for class_id in missing_classes]
             print(f"Warning: {split} split has no annotations for {missing_names}.")
@@ -266,8 +297,8 @@ def main() -> None:
     )
     parser.add_argument("--data", type=Path, default=DATASET_ROOT)
     parser.add_argument("--model", default="yolo11n.pt")
-    parser.add_argument("--epochs", type=int, default=30)
-    parser.add_argument("--imgsz", type=int, default=416)
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--imgsz", type=int, default=512)
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--device", default=None)
     parser.add_argument("--name", default="iot-components-v3")
@@ -305,7 +336,7 @@ def main() -> None:
             batch=args.batch,
             workers=0,
             device=args.device,
-            patience=10,
+            patience=20,
             seed=42,
             project=str(project),
             name=args.name,

@@ -2,12 +2,12 @@ train: ../train/images
 val: ../valid/images
 test: ../test/images
 
-nc: 3
-names: ['relay_module', 'triple_syringe', 'ultrasonic_hc-sr04']
+nc: 4
+names: ['QR', 'relay_module', 'triple_syringe', 'ultrasonic_hc-sr04']
 
 roboflow:
   workspace: senjimasa
-  project: iot-7c74y
+  project: iot_v2
   version: 1
   license: Private
-  url: https://app.roboflow.com/senjimasa/iot-7c74y/1
+  url: https://app.roboflow.com/senjimasa/iot_v2/1
