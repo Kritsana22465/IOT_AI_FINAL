@@ -28,7 +28,7 @@ from ultralytics import YOLO
 
 
 ROOT = Path(__file__).resolve().parent
-MODEL_PATH = ROOT / "best.pt"
+MODEL_PATH = ROOT / "best2.pt"
 PAGE_PATH = ROOT / "web" / "index.html"
 SNAPSHOT_ROOT = Path(
     os.getenv("SNAPSHOT_DIR", str(ROOT / "data" / "snapshots"))

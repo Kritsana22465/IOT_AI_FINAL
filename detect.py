@@ -8,7 +8,7 @@ from ultralytics import YOLO
 
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_WEIGHTS = ROOT / "best.pt"
+DEFAULT_WEIGHTS = ROOT / "best2.pt"
 
 
 def main() -> None:

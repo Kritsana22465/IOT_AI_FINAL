@@ -137,10 +137,9 @@ polygon annotations เป็นกรอบ bounding box สำหรับ YOL
 อาจตรวจพลาดเมื่อเปลี่ยนฉาก ควรเพิ่มภาพของทั้งสามคลาสที่ถ่ายด้วยกล้องและฉากจริง
 แล้วฝึกใหม่เพื่อให้ผลตรวจตรงกับสภาพใช้งาน
 
-แอปและ `detect.py` ใช้โมเดล `best.pt` ที่ root ของโปรเจกต์ ขณะนี้ไฟล์นี้เป็น checkpoint
-จาก `runs/object-detection/iot-components-v3/weights/best.pt` มีคลาส Relay module,
+แอปและ `detect.py` ใช้โมเดล `best2.pt` ที่ root ของโปรเจกต์ มีคลาส Relay module,
 Triple syringe และ Ultrasonic HC-SR04 หากฝึกโมเดลใหม่และตรวจสอบผลแล้ว ให้นำ
-`runs/object-detection/<ชื่อ run>/weights/best.pt` มาทับ `best.pt` ก่อน build หรือ deploy
+`runs/object-detection/<ชื่อ run>/weights/best.pt` ไปตั้งเป็น `best2.pt` ก่อน build หรือ deploy
 
 ## หยุดระบบ local
 
